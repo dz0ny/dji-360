@@ -1,0 +1,23 @@
+# dji.dz0ny.dev
+
+> A personal archive of 360° aerial panoramas, shot on a DJI drone and viewable as full spheres in the browser.
+
+## Overview
+
+Public gallery of equirectangular drone panoramas. Every frame can be dragged, pinched, and looked around in
+directly on a phone; the untouched original is one tap away. Uploads are private — restricted to the site owner
+via Cloudflare Access — but viewing is open to everyone.
+
+## Key Pages
+
+- [Gallery](/) — every panorama, newest first
+- [Viewer](/view/?id=<id>) — a single panorama full-screen
+
+## API
+
+- `GET /~/api/photos` — public JSON listing of every panorama and its metadata
+- `GET /~/img/{thumb|preview|original}/<id>` — the image bytes
+
+## Contact
+
+- Website: https://dji.dz0ny.dev

@@ -1,0 +1,150 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import PanoViewer from "@/components/PanoViewer.astro";
+
+/*
+  Chromeless viewer. The page is prerendered and reads `?id=` on the client, so
+  the sphere starts loading from the constructed image URL immediately rather
+  than waiting on the archive listing — the title and coordinates fill in a
+  moment later.
+*/
+---
+
+<Layout title="Viewer" noindex bare>
+  <div class="relative h-dvh w-full bg-black">
+    {/* One finger looks around here: nothing behind this page needs scrolling.
+        Sized with h-full rather than `absolute inset-0` — the component root is
+        already `relative`, and Tailwind's stylesheet order makes that win over a
+        caller's `absolute`, which would collapse the sphere to zero height. */}
+    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions />
+
+    <div
+      data-pano-chrome
+      class="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 to-transparent pb-12 transition-opacity duration-300"
+      style="padding-top:max(0.75rem, env(safe-area-inset-top))"
+    >
+      <div class="flex items-start gap-3 px-3">
+        <a
+          href="/"
+          class="pointer-events-auto inline-flex min-h-11 items-center gap-2 rounded-full bg-black/45 px-4 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white backdrop-blur-md transition-colors hover:bg-black/70"
+        >
+          <span aria-hidden="true">←</span> Gallery
+        </a>
+      </div>
+    </div>
+
+    <div
+      data-pano-chrome
+      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 to-transparent pt-16 transition-opacity duration-300"
+      style="padding-bottom:calc(3.25rem + env(safe-area-inset-bottom))"
+    >
+      <div class="px-4">
+        <h1
+          class="font-display text-[clamp(1.25rem,5vw,2.25rem)] font-extrabold leading-tight tracking-tight text-white"
+          data-view-title
+        >
+          Loading…
+        </h1>
+        <p class="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white/70" data-view-meta></p>
+        <p class="mt-2 max-w-prose text-sm text-white/80" data-view-description hidden></p>
+      </div>
+    </div>
+
+    <p
+      class="absolute inset-0 z-30 hidden place-items-center bg-black p-8 text-center font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-white/70"
+      data-view-error
+      role="alert"
+    ></p>
+  </div>
+</Layout>
+
+<script>
+  import { API } from "@/config";
+  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl } from "@/lib/photos";
+
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id") ?? "";
+
+  const titleEl = document.querySelector<HTMLElement>("[data-view-title]");
+  const metaEl = document.querySelector<HTMLElement>("[data-view-meta]");
+  const descEl = document.querySelector<HTMLElement>("[data-view-description]");
+  const errorEl = document.querySelector<HTMLElement>("[data-view-error]");
+
+  function showError(message: string) {
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+    errorEl.classList.add("grid");
+  }
+
+  if (!/^[a-z0-9][a-z0-9-]{4,63}$/.test(id)) {
+    showError("No panorama selected.");
+  } else {
+    // Start the sphere immediately — the metadata request can lag behind.
+    document.dispatchEvent(
+      new CustomEvent("pano:load", { detail: { target: "#stage", src: `${API.img}/preview/${id}` } }),
+    );
+
+    void (async () => {
+      try {
+        const photo = (await fetchPhotos()).find((p) => p.id === id);
+        if (!photo) {
+          showError("That panorama is not in the archive.");
+          return;
+        }
+
+        const title = displayTitle(photo);
+        document.title = `${title} | dji.dz0ny.dev`;
+        if (titleEl) titleEl.textContent = title;
+
+        const coords = formatCoords(photo);
+        const parts = [formatDate(photo), coords, photo.camera, formatBytes(photo.bytes)].filter(Boolean);
+        if (metaEl) {
+          metaEl.textContent = parts.join(" · ");
+          const map = mapUrl(photo);
+          if (map) {
+            const link = document.createElement("a");
+            link.href = map;
+            link.target = "_blank";
+            link.rel = "noreferrer";
+            link.textContent = "Map ↗";
+            link.className = "pointer-events-auto ml-2 underline underline-offset-4 hover:text-white";
+            metaEl.append(link);
+          }
+        }
+
+        /*
+          Hand the plugins what only the archive knows: coordinates for the
+          minimap, and the two textures we actually store. The preview entry has
+          to be the exact URL the viewer booted from, or the resolution plugin
+          treats it as a change and reloads the same image.
+        */
+        document.dispatchEvent(
+          new CustomEvent("pano:meta", {
+            detail: {
+              target: "#stage",
+              lat: photo.lat,
+              lon: photo.lon,
+              resolutions: [
+                { id: "4k", label: "4K preview", panorama: `${API.img}/preview/${id}` },
+                {
+                  id: "max",
+                  label: `Full size${photo.bytes ? ` · ${formatBytes(photo.bytes)}` : ""}`,
+                  panorama: photo.original,
+                },
+              ],
+            },
+          }),
+        );
+
+        if (photo.description && descEl) {
+          descEl.textContent = photo.description;
+          descEl.hidden = false;
+        }
+      } catch {
+        // The sphere is already up; a failed metadata fetch is not fatal.
+        if (titleEl) titleEl.textContent = "Panorama";
+      }
+    })();
+  }
+</script>

@@ -1,0 +1,308 @@
+---
+import Layout from "@/layouts/Layout.astro";
+
+/*
+  Upload console. Prerendered like every other page — the gate is enforced by
+  Cloudflare Access in front of this path and, independently, by the Worker on
+  every write. This page only *reflects* that state; it never grants anything.
+*/
+---
+
+<Layout title="Upload" description="Add panoramas to the archive." noindex>
+  <section class="mx-auto max-w-3xl px-[var(--spacing-gutter)] pb-[var(--spacing-section)] pt-10">
+    <header class="border-b border-border/70 pb-5">
+      <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary">Console</p>
+      <h1 class="mt-2 font-display text-[clamp(1.75rem,6vw,3rem)] font-extrabold leading-[1.02] tracking-[-0.03em]">
+        Add panoramas
+      </h1>
+      <p class="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground">
+        Drop equirectangular JPEGs straight off the drone. Every size is built here in the browser — the
+        archive keeps an 8192px copy, so a 37&nbsp;MB file uploads as roughly 7.
+      </p>
+      <p class="mt-3 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-identity></p>
+    </header>
+
+    {/* Signed out */}
+    <div class="hidden" data-gate>
+      <div class="mt-8 rounded-lg border border-dashed border-border p-8 text-center">
+        <p class="font-display text-xl font-extrabold tracking-tight">Not signed in</p>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted-foreground" data-gate-reason></p>
+        <button
+          type="button"
+          data-gate-retry
+          class="mt-6 inline-flex min-h-11 items-center rounded-md bg-primary px-5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          Sign in
+        </button>
+      </div>
+    </div>
+
+    {/* Signed in */}
+    <div class="hidden" data-console>
+      <label
+        data-drop
+        for="pano-input"
+        class="mt-8 flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-card/40 p-8 text-center transition-colors hover:border-brand-primary/70 data-[dragging]:border-brand-primary data-[dragging]:bg-brand-primary/5"
+      >
+        <span class="font-display text-lg font-extrabold tracking-tight">Drop panoramas here</span>
+        <span class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">
+          or tap to choose files
+        </span>
+        <input id="pano-input" type="file" accept="image/jpeg,image/png,image/webp" multiple class="sr-only" />
+      </label>
+
+      <ul class="mt-6 space-y-3" data-queue></ul>
+
+      <div class="mt-12">
+        <div class="flex items-baseline justify-between gap-4 border-b border-border/70 pb-4">
+          <h2 class="font-display text-lg font-extrabold tracking-tight sm:text-xl">In the archive</h2>
+          <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
+            Loading
+          </p>
+        </div>
+        <ul class="divide-y divide-border/70" data-manage></ul>
+      </div>
+    </div>
+
+    <p class="mt-8 hidden text-sm text-destructive" data-fatal role="alert"></p>
+  </section>
+</Layout>
+
+<script>
+  import { displayTitle, escapeHtml, fetchPhotos, formatBytes, formatDate, viewUrl, type Photo } from "@/lib/photos";
+  import { deletePanorama, renamePanorama, uploadPanorama, whoami, type UploadStage } from "@/lib/upload";
+
+  const gate = document.querySelector<HTMLElement>("[data-gate]");
+  const gateReason = document.querySelector<HTMLElement>("[data-gate-reason]");
+  const gateRetry = document.querySelector<HTMLButtonElement>("[data-gate-retry]");
+  const consoleEl = document.querySelector<HTMLElement>("[data-console]");
+  const identity = document.querySelector<HTMLElement>("[data-identity]");
+  const drop = document.querySelector<HTMLElement>("[data-drop]");
+  const input = document.querySelector<HTMLInputElement>("#pano-input");
+  const queue = document.querySelector<HTMLElement>("[data-queue]");
+  const manage = document.querySelector<HTMLElement>("[data-manage]");
+  const manageHint = document.querySelector<HTMLElement>("[data-manage-hint]");
+  const fatal = document.querySelector<HTMLElement>("[data-fatal]");
+
+  const STAGE_LABEL: Record<UploadStage, string> = {
+    reading: "Reading metadata",
+    resizing: "Building sizes",
+    preview: "Uploading preview",
+    original: "Uploading full size",
+    thumb: "Finishing",
+    done: "Done",
+  };
+
+  function showFatal(message: string) {
+    if (!fatal) return;
+    fatal.textContent = message;
+    fatal.classList.remove("hidden");
+  }
+
+  /* ---------------------------------------------------------------- queue */
+
+  /** One row per file, created up front so the whole batch is visible at once. */
+  function queueRow(file: File): {
+    setStage: (stage: UploadStage, ratio: number) => void;
+    setError: (message: string) => void;
+    setDone: (id: string, warning: string | null) => void;
+  } {
+    const li = document.createElement("li");
+    li.className = "rounded-lg border border-border bg-card p-4";
+    li.innerHTML = `
+      <div class="flex items-baseline justify-between gap-3">
+        <p class="min-w-0 truncate text-sm font-medium">${escapeHtml(file.name)}</p>
+        <p class="shrink-0 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-size>
+          ${escapeHtml(formatBytes(file.size))}
+        </p>
+      </div>
+      <div class="mt-3 h-1 overflow-hidden rounded-full bg-muted">
+        <div class="h-full w-0 rounded-full bg-brand-primary transition-[width] duration-300 ease-out" data-bar></div>
+      </div>
+      <p class="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-stage>Queued</p>`;
+    queue?.prepend(li);
+
+    const bar = li.querySelector<HTMLElement>("[data-bar]");
+    const stageEl = li.querySelector<HTMLElement>("[data-stage]");
+
+    return {
+      setStage(stage, ratio) {
+        if (bar) bar.style.width = `${Math.round(ratio * 100)}%`;
+        if (stageEl) stageEl.textContent = `${STAGE_LABEL[stage]} · ${Math.round(ratio * 100)}%`;
+      },
+      setError(message) {
+        bar?.classList.replace("bg-brand-primary", "bg-destructive");
+        if (stageEl) {
+          stageEl.textContent = message;
+          stageEl.className = "mt-2 text-xs text-destructive";
+        }
+      },
+      setDone(id, warning) {
+        if (bar) bar.style.width = "100%";
+        if (!stageEl) return;
+        stageEl.innerHTML = warning
+          ? `<span class="text-brand-accent">${escapeHtml(warning)}</span>`
+          : `Uploaded · <a class="underline underline-offset-4" href="${viewUrl(id)}">view</a>`;
+        stageEl.className = "mt-2 text-xs text-muted-foreground";
+      },
+    };
+  }
+
+  let busy = false;
+
+  /** Sequential on purpose: two 40 MB uploads in parallel just starve each other. */
+  async function runQueue(files: File[]) {
+    if (busy) return;
+    busy = true;
+    let uploaded = 0;
+
+    for (const file of files) {
+      const row = queueRow(file);
+      try {
+        const { id, warning } = await uploadPanorama(file, {
+          onProgress: ({ stage, ratio }) => row.setStage(stage, ratio),
+        });
+        row.setDone(id, warning);
+        uploaded++;
+      } catch (error) {
+        row.setError(error instanceof Error ? error.message : "Upload failed");
+      }
+    }
+
+    busy = false;
+    if (uploaded > 0) void loadManage();
+  }
+
+  function accept(list: FileList | null) {
+    const files = Array.from(list ?? []).filter((f) => f.type.startsWith("image/"));
+    if (files.length > 0) void runQueue(files);
+  }
+
+  /* --------------------------------------------------------------- manage */
+
+  function manageRow(photo: Photo): string {
+    const title = escapeHtml(displayTitle(photo));
+    return `
+      <li class="flex items-center gap-3 py-3" data-row="${escapeHtml(photo.id)}">
+        <a href="${viewUrl(photo.id)}" class="shrink-0">
+          <img
+            src="${photo.thumb}"
+            alt=""
+            width="112"
+            height="56"
+            loading="lazy"
+            decoding="async"
+            class="h-14 w-28 rounded object-cover"
+          />
+        </a>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-medium">${title}</p>
+          <p class="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">
+            ${escapeHtml(formatDate(photo))}${photo.bytes ? ` · ${escapeHtml(formatBytes(photo.bytes))}` : ""}
+          </p>
+        </div>
+        <div class="flex shrink-0 gap-1">
+          <button
+            type="button"
+            data-rename
+            class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Rename ${title}"
+          >Edit</button>
+          <button
+            type="button"
+            data-delete
+            class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
+            aria-label="Delete ${title}"
+          >Del</button>
+        </div>
+      </li>`;
+  }
+
+  async function loadManage() {
+    if (!manage) return;
+    try {
+      const photos = await fetchPhotos();
+      manage.innerHTML = photos.map(manageRow).join("");
+      if (manageHint) {
+        manageHint.textContent = photos.length
+          ? `${photos.length} panorama${photos.length === 1 ? "" : "s"}`
+          : "Empty";
+      }
+    } catch (error) {
+      if (manageHint) manageHint.textContent = "Unavailable";
+      showFatal(error instanceof Error ? error.message : "Could not load the archive.");
+    }
+  }
+
+  /**
+   * `prompt`/`confirm` are the one place a modal dialog is the honest control:
+   * a rename is a single field and a delete is irreversible.
+   */
+  manage?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const row = target.closest<HTMLElement>("[data-row]");
+    const id = row?.dataset.row;
+    if (!row || !id) return;
+
+    if (target.closest("[data-rename]")) {
+      const current = row.querySelector("p")?.textContent?.trim() ?? "";
+      const next = window.prompt("Title", current);
+      if (next === null) return;
+      void renamePanorama(id, next)
+        .then(loadManage)
+        .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Rename failed"));
+      return;
+    }
+
+    if (target.closest("[data-delete]")) {
+      if (!window.confirm("Delete this panorama? The original goes too.")) return;
+      void deletePanorama(id)
+        .then(() => row.remove())
+        .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Delete failed"));
+    }
+  });
+
+  /* ----------------------------------------------------------------- boot */
+
+  drop?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    drop.dataset.dragging = "";
+  });
+  drop?.addEventListener("dragleave", () => delete drop.dataset.dragging);
+  drop?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    delete drop.dataset.dragging;
+    accept(event.dataTransfer?.files ?? null);
+  });
+
+  input?.addEventListener("change", () => {
+    accept(input.files);
+    input.value = ""; // let the same file be re-picked after a failure
+  });
+
+  // Uploads survive a phone locking mid-transfer far better than a closed tab.
+  window.addEventListener("beforeunload", (event) => {
+    if (!busy) return;
+    event.preventDefault(); // modern browsers show their own generic warning
+  });
+
+  gateRetry?.addEventListener("click", () => window.location.reload());
+
+  void (async () => {
+    const auth = await whoami();
+    if (auth.authorized) {
+      consoleEl?.classList.remove("hidden");
+      if (identity && auth.email) identity.textContent = `Signed in as ${auth.email}`;
+      void loadManage();
+      return;
+    }
+    gate?.classList.remove("hidden");
+    if (gateReason) {
+      gateReason.textContent = auth.reason?.includes("not responding")
+        ? "The archive API did not respond. Reload the page; if it persists, the Worker is down."
+        : auth.reason?.includes("not configured")
+          ? "Uploads stay locked until Cloudflare Access is configured for this Worker."
+          : "Sign in with Cloudflare Access to upload. If you just signed in, reload the page.";
+    }
+  })();
+</script>

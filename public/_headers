@@ -1,0 +1,45 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: accelerometer=(self), autoplay=*, camera=(), display-capture=(), encrypted-media=*, fullscreen=*, geolocation=(), gyroscope=(self), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=*, picture-in-picture=*, publickey-credentials-get=(), screen-wake-lock=(), serial=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; img-src 'self' data: blob: https:; media-src 'self' https: blob:; connect-src 'self' https: wss:; frame-src 'self' https:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https:; frame-ancestors 'none'; upgrade-insecure-requests
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/pagefind/*
+  Cache-Control: public, max-age=86400
+
+# The default link-preview card. Scrapers refetch it often and it changes about
+# never, so let it sit in every cache between here and them.
+/og.jpg
+  Cache-Control: public, max-age=2592000, stale-while-revalidate=31536000
+
+/favicon-*
+  Cache-Control: public, max-age=86400
+
+/favicon.ico
+  Cache-Control: public, max-age=86400
+
+/favicon.svg
+  Cache-Control: public, max-age=86400
+
+/apple-touch-icon*
+  Cache-Control: public, max-age=86400
+
+/android-chrome-*
+  Cache-Control: public, max-age=86400
+
+/mstile-*
+  Cache-Control: public, max-age=86400
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=86400
+
+/browserconfig.xml
+  Cache-Control: public, max-age=86400
+
+/
+
+  Link: </sitemap-index.xml>; rel="sitemap", </llms.txt>; rel="describedby"; type="text/plain"
+  Content-Signal: ai-train=no, search=yes, ai-input=yes

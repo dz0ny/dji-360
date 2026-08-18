@@ -1,0 +1,233 @@
+---
+import { Picture } from "astro:assets";
+import Layout from "@/layouts/Layout.astro";
+import samplePano from "@/assets/sample-pano.jpg";
+
+/*
+  Style preview — all three directions realized against the real panorama, so
+  the choice is made from pixels rather than prose. Excluded from nav and
+  noindexed; once a direction is locked this page stays on as the living style
+  guide for whatever ships.
+
+  Each direction is a `[data-direction]` subtree, which re-declares the same
+  token set from `src/index.css`. Nothing here is bespoke CSS — if a swatch
+  looks wrong, the token is wrong.
+*/
+
+type Direction = {
+	id: "dark-room" | "flight-log" | "paper-sky";
+	name: string;
+	concept: string;
+	language: string;
+	dials: string;
+	scheme: string;
+	fonts: string;
+	signature: string;
+};
+
+const DIRECTIONS: Direction[] = [
+	{
+		id: "dark-room",
+		name: "Dark Room",
+		concept: "A darkroom for aerial work — the archive recedes, the photographs glow.",
+		language: "Dark + Minimalist",
+		dials: "VARIANCE 6 · MOTION 5 · DENSITY 3",
+		scheme: "Triadic (one leg held in reserve) · cool blue-slate near-black",
+		fonts: "Bricolage Grotesque 800 / Public Sans 300–700 / JetBrains Mono",
+		signature: "Split-stage hero — live sphere behind a bottom-left title and a monospace stat rail",
+	},
+	{
+		id: "flight-log",
+		name: "Flight Log",
+		concept: "The panorama as telemetry: amber instrument glow over a warm-black cockpit.",
+		language: "Technology + Brutalist edge",
+		dials: "VARIANCE 7 · MOTION 4 · DENSITY 6",
+		scheme: "Triadic · warm-black base, amber primary, sky-blue counterweight",
+		fonts: "Bricolage Grotesque 800 / JetBrains Mono 400–700 throughout",
+		signature: "Hard-cornered data slab — everything reads as a readout, nothing is rounded",
+	},
+	{
+		id: "paper-sky",
+		name: "Paper Sky",
+		concept: "Gallery print on paper. The page supplies no colour; the photograph supplies all of it.",
+		language: "Minimalist + Elegant",
+		dials: "VARIANCE 4 · MOTION 3 · DENSITY 2",
+		scheme: "Complementary · near-white ground, single cobalt accent",
+		fonts: "Fraunces 300–700 / Public Sans 300–700",
+		signature: "Full-bleed plate with generous margin — the image floats, type stays out of the way",
+	},
+];
+
+const SWATCHES = [
+	{ token: "--background", label: "Background", role: "60%" },
+	{ token: "--card", label: "Card", role: "surface" },
+	{ token: "--muted", label: "Muted", role: "rest" },
+	{ token: "--primary", label: "Primary", role: "30%" },
+	{ token: "--brand-accent", label: "Accent", role: "10%" },
+	{ token: "--destructive", label: "Destructive", role: "alert" },
+];
+---
+
+<Layout title="Style preview" description="Three design directions for the archive." noindex>
+  <section class="mx-auto max-w-3xl px-[var(--spacing-gutter)] pt-10">
+    <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary">Style preview</p>
+    <h1 class="mt-2 font-display text-[clamp(1.75rem,6vw,3rem)] font-extrabold leading-[1.02] tracking-[-0.03em]">
+      Three directions, one archive
+    </h1>
+    <p class="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground">
+      Same panorama, same components, three complete token sets. Pick one and the rest of the site is built on it —
+      the winning direction becomes <code class="font-mono text-xs">:root</code> and this page stays as the style guide.
+      The site currently ships <strong class="font-semibold text-foreground">Dark Room</strong>.
+    </p>
+  </section>
+
+  {
+    DIRECTIONS.map((direction, index) => (
+      <section
+        data-direction={direction.id}
+        class="mt-12 bg-background text-foreground"
+        aria-labelledby={`dir-${direction.id}`}
+      >
+        <div class="mx-auto max-w-5xl px-[var(--spacing-gutter)] py-[var(--spacing-section)]">
+          <header class="border-b border-border pb-6">
+            <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary">
+              Direction {String(index + 1).padStart(2, "0")}
+            </p>
+            <h2
+              id={`dir-${direction.id}`}
+              class="mt-2 font-display text-[clamp(2rem,6vw,3.5rem)] font-extrabold leading-[0.98] tracking-[-0.03em]"
+            >
+              {direction.name}
+            </h2>
+            <p class="mt-3 max-w-prose text-base leading-relaxed text-muted-foreground">{direction.concept}</p>
+
+            <dl class="mt-6 grid gap-x-8 gap-y-2 font-mono text-[0.6875rem] sm:grid-cols-2">
+              {[
+                ["Language", direction.language],
+                ["Dials", direction.dials],
+                ["Palette", direction.scheme],
+                ["Type", direction.fonts],
+              ].map(([term, value]) => (
+                <div class="flex gap-3">
+                  <dt class="w-20 shrink-0 uppercase tracking-[0.16em] text-muted-foreground">{term}</dt>
+                  <dd class="min-w-0 flex-1">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </header>
+
+          {/* Sample hero — the direction's signature move, at full width */}
+          <div class="relative mt-8 overflow-hidden rounded-[var(--radius)] bg-card shadow-soft">
+            <Picture
+              src={samplePano}
+              alt={`Example equirectangular panorama shown in the ${direction.name} direction`}
+              width={1200}
+              widths={[600, 1200, 2400]}
+              sizes="(min-width: 1024px) 960px, 100vw"
+              formats={["avif", "webp"]}
+              class="aspect-pano w-full object-cover"
+              loading={index === 0 ? "eager" : "lazy"}
+            />
+            <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+            <div class="absolute inset-x-0 bottom-0 flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
+              <div class="max-w-lg">
+                <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary">Latest</p>
+                <p class="mt-1 font-display text-[clamp(1.5rem,5vw,2.5rem)] font-extrabold leading-[0.98] tracking-[-0.03em]">
+                  Ljubljana marshes, 120 m
+                </p>
+                <p class="mt-2 text-sm text-muted-foreground">{direction.signature}</p>
+              </div>
+              <dl class="shrink-0 font-mono text-[0.625rem] uppercase tracking-[0.16em] sm:text-right">
+                <div class="flex gap-3 sm:block">
+                  <dt class="text-muted-foreground">Panoramas</dt>
+                  <dd class="font-bold tracking-normal">128</dd>
+                </div>
+                <div class="mt-1 flex gap-3 sm:block">
+                  <dt class="text-muted-foreground">Located</dt>
+                  <dd class="font-bold tracking-normal">124/128</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          {/* Palette */}
+          <h3 class="mt-12 font-display text-lg font-extrabold tracking-tight">Palette</h3>
+          <ul class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {SWATCHES.map((swatch) => (
+              <li class="overflow-hidden rounded-[var(--radius)] border border-border">
+                <div class="h-16 w-full" style={`background: hsl(var(${swatch.token}))`} />
+                <div class="p-2">
+                  <p class="font-mono text-[0.625rem] uppercase tracking-[0.12em]">{swatch.label}</p>
+                  <p class="font-mono text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground">
+                    {swatch.role}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* Type specimen */}
+          <h3 class="mt-12 font-display text-lg font-extrabold tracking-tight">Type</h3>
+          <div class="mt-4 space-y-3 border-l-2 border-brand-primary pl-5">
+            <p class="font-display text-[clamp(2rem,7vw,4rem)] font-extrabold leading-[0.95] tracking-[-0.03em]">
+              360° archive
+            </p>
+            <p class="font-display text-2xl font-bold tracking-tight">Every frame, the whole sky</p>
+            <p class="max-w-prose text-base leading-relaxed text-muted-foreground">
+              Body copy at the direction's own weight and measure. Equirectangular panoramas are stored whole, served
+              as a 4096-pixel preview, and opened in a sphere the moment the card is tapped — the original stays one
+              click away for anyone who wants all 40 megabytes of it.
+            </p>
+            <p class="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
+              46.0483°N 14.5060°E · 120 m · DJI Mavic 3 · 38.4 MB
+            </p>
+          </div>
+
+          {/* Components */}
+          <h3 class="mt-12 font-display text-lg font-extrabold tracking-tight">Components</h3>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center rounded-[var(--radius)] bg-primary px-5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary-foreground transition-transform active:scale-[0.98]"
+            >
+              Upload a panorama
+            </button>
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center rounded-[var(--radius)] border border-border px-5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] transition-colors hover:bg-muted"
+            >
+              View original
+            </button>
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center rounded-[var(--radius)] bg-destructive px-5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-destructive-foreground"
+            >
+              Delete
+            </button>
+            <span class="grid size-11 place-items-center rounded-full bg-brand-primary font-mono text-[0.5625rem] uppercase tracking-[0.1em] text-brand-accent-foreground">
+              360
+            </span>
+          </div>
+
+          <div class="mt-6 grid gap-4 sm:grid-cols-2">
+            <div class="rounded-[var(--radius)] border border-border bg-card p-5">
+              <p class="font-display text-base font-extrabold tracking-tight">Card surface</p>
+              <p class="mt-1 text-sm text-muted-foreground">
+                Gallery cards, queue rows, and the manage list all sit on this tone.
+              </p>
+            </div>
+            <label class="rounded-[var(--radius)] border border-dashed border-border p-5">
+              <span class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">Title</span>
+              <input
+                type="text"
+                value="Ljubljana marshes, 120 m"
+                readonly
+                class="mt-2 block min-h-11 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm text-foreground"
+              />
+            </label>
+          </div>
+        </div>
+      </section>
+    ))
+  }
+</Layout>

@@ -1,0 +1,35 @@
+name = 'dji-360'
+main = "worker/index.js"
+compatibility_date = "2026-06-24"
+preview_urls = true
+workers_dev = true
+
+[observability.logs]
+enabled = false
+
+[placement]
+mode = "smart"
+
+[assets]
+directory = "./dist/client"
+not_found_handling = "404-page"
+html_handling = "force-trailing-slash"
+run_worker_first = ["/~*"]
+binding = "ASSETS"
+
+[[routes]]
+pattern = "dji.dz0ny.dev"
+custom_domain = true
+
+# Auto-provisioned on first `wrangler dev` / `wrangler deploy`.
+# `bucket_name` is deliberately omitted so Wrangler creates and links the bucket.
+[[r2_buckets]]
+binding = "PHOTOS"
+
+[vars]
+# Cloudflare Access — application "dji.dz0ny.dev admin" (self-hosted).
+# Access itself only guards /admin*; the CF_Authorization cookie it sets is
+# host-scoped, so the write API verifies that same JWT itself. That keeps
+# GET /~/api/photos public for the gallery while every mutation stays locked.
+ACCESS_TEAM_DOMAIN = "dz0ny.cloudflareaccess.com"
+ACCESS_AUD = "cb83e4a367522f9e1ba272001b34267774606312a95d887e1166a226096e6959"

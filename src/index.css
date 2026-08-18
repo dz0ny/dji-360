@@ -1,0 +1,371 @@
+@import 'tailwindcss';
+
+@plugin 'tailwindcss-animate';
+
+@custom-variant dark (&:is(.dark *));
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+  @media (width >= --theme(--breakpoint-sm)) {
+    max-width: none;
+    padding-inline: 2rem;
+  }
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-brand-primary: hsl(var(--brand-primary));
+  --color-brand-accent: hsl(var(--brand-accent));
+  --color-brand-accent-foreground: hsl(var(--brand-accent-foreground));
+
+  /* Typography — each direction rebinds these three roles. */
+  --font-display: var(--type-display);
+  --font-sans: var(--type-body);
+  --font-mono: var(--type-meta);
+
+  /* Density — set once per direction, inherited by every section. */
+  --spacing-section: var(--density-section);
+  --spacing-gutter: var(--density-gutter);
+
+  --shadow-soft: var(--shadow-1);
+  --shadow-medium: var(--shadow-2);
+  --shadow-strong: var(--shadow-3);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-rise: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-drift: drift 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-sweep: sweep 1.4s ease-in-out infinite;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(1.25rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes drift {
+    from {
+      opacity: 0;
+      transform: translateY(2rem) scale(1.03);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes sweep {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(200%);
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: hsl(var(--border));
+  }
+}
+
+/*
+  Three design directions live side by side so `/branding/` can show all of
+  them at once. `data-direction` on <html> picks one; "dark-room" is the
+  :root default. Palettes are OKLCH-derived and WCAG-checked — see
+  site-specification.md for the scheme behind each.
+*/
+
+@layer base {
+  /* ── Dark Room ──────────────────────────────────────────────────────────
+     Cool blue-slate near-black (hue 250), triadic 250/10/130 with the 130
+     leg held in reserve. Sky-cyan is the single bright note. */
+  :root,
+  [data-direction='dark-room'] {
+    --background: 210.8 32.8% 6.3%;
+    --foreground: 211.2 29.0% 93.8%;
+
+    --card: 210.8 23.4% 10.8%;
+    --card-foreground: 211.2 29.0% 93.8%;
+
+    --popover: 210.9 20.4% 12.6%;
+    --popover-foreground: 211.2 29.0% 93.8%;
+
+    --muted: 210.9 15.0% 15.4%;
+    --muted-foreground: 211.1 7.2% 64.9%;
+
+    --border: 210.9 14.2% 19.3%;
+    --input: 210.9 14.2% 19.3%;
+
+    --primary: 184.4 99.7% 45.4%;
+    --primary-foreground: 210.6 41.8% 7.2%;
+
+    --secondary: 210.8 21.4% 15.5%;
+    --secondary-foreground: 211.2 29.0% 93.8%;
+
+    --accent: 210.8 20.3% 18.5%;
+    --accent-foreground: 211.2 27.2% 95.0%;
+
+    --brand-primary: 184.4 99.7% 45.4%;
+    --brand-accent: 348.8 75.1% 68.5%;
+    --brand-accent-foreground: 210.7 46.7% 6.4%;
+
+    --destructive: 359.5 63.7% 52.9%;
+    --destructive-foreground: 211.2 30.4% 96.3%;
+
+    --ring: 184.4 99.7% 45.4%;
+
+    --type-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+    --type-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+    --type-meta: var(--font-jetbrains), ui-monospace, monospace;
+
+    /* DENSITY 3 — airy */
+    --density-section: 6rem;
+    --density-gutter: 1.25rem;
+
+    --radius: 0.875rem;
+    --shadow-1: 0 1px 2px hsl(210 40% 2% / 0.6);
+    --shadow-2: 0 12px 40px hsl(210 40% 2% / 0.55);
+    --shadow-3: 0 28px 80px hsl(210 40% 2% / 0.7);
+  }
+
+  /* ── Flight Log ─────────────────────────────────────────────────────────
+     Warm-black (hue 70), complementary 70/250. Instrument amber reads out;
+     the cool complement is reserved for links and live status. */
+  [data-direction='flight-log'] {
+    --background: 31.4 29.8% 4.9%;
+    --foreground: 31.3 23.4% 90.4%;
+
+    --card: 31.6 20.6% 9.1%;
+    --card-foreground: 31.3 23.4% 90.4%;
+
+    --popover: 31.5 17.6% 10.9%;
+    --popover-foreground: 31.3 23.4% 90.4%;
+
+    --muted: 31.5 14.4% 13.7%;
+    --muted-foreground: 31.3 8.2% 63.9%;
+
+    --border: 31.5 13.7% 17.4%;
+    --input: 31.5 13.7% 17.4%;
+
+    --primary: 40.7 95.2% 57.2%;
+    --primary-foreground: 31.2 55.0% 5.3%;
+
+    --secondary: 31.7 22.2% 13.4%;
+    --secondary-foreground: 31.3 23.4% 90.4%;
+
+    --accent: 31.7 21.0% 16.2%;
+    --accent-foreground: 31.2 26.2% 93.1%;
+
+    --brand-primary: 40.7 95.2% 57.2%;
+    --brand-accent: 209.7 92.3% 66.2%;
+    --brand-accent-foreground: 30.0 60.3% 4.6%;
+
+    --destructive: 359.5 63.7% 52.9%;
+    --destructive-foreground: 31.2 27.3% 95.8%;
+
+    --ring: 40.7 95.2% 57.2%;
+
+    --type-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+    --type-body: var(--font-jetbrains), ui-monospace, monospace;
+    --type-meta: var(--font-jetbrains), ui-monospace, monospace;
+
+    /* DENSITY 6 — packed */
+    --density-section: 3.5rem;
+    --density-gutter: 0.75rem;
+
+    --radius: 0.125rem;
+    --shadow-1: 0 1px 0 hsl(31 30% 2% / 0.8);
+    --shadow-2: 0 6px 20px hsl(31 30% 2% / 0.6);
+    --shadow-3: 0 16px 44px hsl(31 30% 2% / 0.75);
+  }
+
+  /* ── Paper Sky ──────────────────────────────────────────────────────────
+     Near-white cool paper (hue 232) with one cobalt accent. Every other
+     colour on the page comes from the photographs. */
+  [data-direction='paper-sky'] {
+    --background: 201.7 47.1% 98.0%;
+    --foreground: 201.2 19.7% 12.1%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 201.2 19.7% 12.1%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 201.2 19.7% 12.1%;
+
+    --muted: 201.7 23.6% 94.1%;
+    --muted-foreground: 201.5 6.9% 41.0%;
+
+    --border: 201.6 14.1% 86.9%;
+    --input: 201.6 14.1% 86.9%;
+
+    --primary: 201.2 20.0% 13.9%;
+    --primary-foreground: 201.7 35.4% 97.3%;
+
+    --secondary: 201.7 23.6% 94.1%;
+    --secondary-foreground: 201.2 20.0% 13.9%;
+
+    --accent: 201.6 30.2% 90.8%;
+    --accent-foreground: 201.2 20.0% 13.9%;
+
+    --brand-primary: 201.2 20.0% 13.9%;
+    --brand-accent: 202.3 99.9% 32.4%;
+    --brand-accent-foreground: 201.7 53.0% 98.7%;
+
+    --destructive: 355.0 79.0% 42.4%;
+    --destructive-foreground: 201.7 53.0% 98.7%;
+
+    --ring: 202.3 99.9% 32.4%;
+
+    --type-display: var(--font-fraunces), Georgia, serif;
+    --type-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+    --type-meta: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+
+    /* DENSITY 2 — gallery */
+    --density-section: 8rem;
+    --density-gutter: 1.5rem;
+
+    --radius: 0.25rem;
+    --shadow-1: 0 1px 2px hsl(201 20% 20% / 0.06);
+    --shadow-2: 0 10px 30px hsl(201 20% 20% / 0.08);
+    --shadow-3: 0 24px 60px hsl(201 20% 20% / 0.12);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Panoramas run edge to edge; never let a wide child scroll the page. */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* Dark directions carry a readability tax — loosen the body a touch. */
+    line-height: 1.65;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    text-wrap: balance;
+  }
+
+  /* Keep tap targets honest on phones. */
+  button,
+  [role='button'],
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* A panorama tile is always 2:1 — that's what equirectangular means. */
+  .aspect-pano {
+    aspect-ratio: 2 / 1;
+  }
+
+  .section-y {
+    padding-block: var(--spacing-section);
+  }
+
+  /* Scroll-reveal: hidden until the IntersectionObserver marks it visible.
+     Progressive enhancement — no JS means everything is simply shown. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(1.5rem);
+    transition:
+      opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}

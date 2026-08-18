@@ -1,0 +1,638 @@
+---
+/**
+ * Equirectangular sphere viewer.
+ *
+ * Photo Sphere Viewer pulls in three.js (~600 kB raw), so it is imported
+ * dynamically and only once the container is actually near the viewport. Until
+ * then the slot renders a flat 2:1 still, which is what a phone on a slow
+ * connection should get anyway.
+ *
+ * `twoFingers` is the mobile-critical prop: inside a scrolling page it must be
+ * true so a one-finger swipe scrolls past the panorama instead of trapping the
+ * gesture. On the dedicated /view/ page it is false so a single finger looks
+ * around.
+ */
+interface Props {
+	/** Equirectangular image URL. Omit to boot the viewer later via `viewer.setPanorama`. */
+	src?: string;
+	caption?: string;
+	/** Require two fingers to pan. True inside scrollable pages, false full-screen. */
+	twoFingers?: boolean;
+	/** Slow idle rotation until the first interaction. */
+	autorotate?: boolean;
+	/** Show the floating navbar. False for teaser spheres that link out to /view/. */
+	controls?: boolean;
+	/**
+	 * Load the map plugin. Off by default — it is dead weight on a page whose
+	 * panoramas have no coordinates, and the minimap image is stitched from OSM
+	 * tiles at runtime, which is a network round trip the hero does not want.
+	 */
+	map?: boolean;
+	/** Load the settings + resolution plugins, so the viewer can swap textures. */
+	resolutions?: boolean;
+	class?: string;
+	id?: string;
+}
+
+const {
+	src,
+	caption = "",
+	twoFingers = true,
+	autorotate = false,
+	controls = true,
+	map = false,
+	resolutions = false,
+	class: className = "",
+	id,
+} = Astro.props;
+---
+
+<div
+  id={id}
+  class:list={["pano relative isolate overflow-hidden bg-black", className]}
+  data-pano
+  data-src={src}
+  data-caption={caption}
+  data-two-fingers={String(twoFingers)}
+  data-autorotate={String(autorotate)}
+  data-controls={String(controls)}
+  data-map={String(map)}
+  data-resolutions={String(resolutions)}
+>
+  {/* Poster / fallback: whatever the caller slots in, usually a flat <Picture>. */}
+  <div class="pano-poster absolute inset-0 transition-opacity duration-700" data-pano-poster>
+    <slot />
+  </div>
+
+  <div class="pano-stage absolute inset-0 opacity-0 transition-opacity duration-700" data-pano-stage></div>
+
+  <div
+    class="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-center pb-4 transition-opacity duration-500"
+    data-pano-hint
+    hidden
+  >
+    <p class="rounded-full bg-black/55 px-3.5 py-1.5 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white/90 backdrop-blur-sm">
+      <span class="sm:hidden">{twoFingers ? "Two fingers to look around" : "Drag to look around"}</span>
+      <span class="hidden sm:inline">Drag to look around</span>
+    </p>
+  </div>
+
+  <noscript>
+    <p class="absolute inset-x-0 bottom-0 bg-black/60 p-3 text-center font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white">
+      Enable JavaScript to explore this panorama
+    </p>
+  </noscript>
+</div>
+
+<style is:global>
+  /* Photo Sphere Viewer paints its own chrome; align it with the site tokens. */
+  .pano .psv-container {
+    background: #000;
+  }
+
+  /*
+    The stock navbar is a full-width black bar with oversized glyphs that sits
+    on top of the caption block. Float it instead: a small centred pill, clear
+    of the safe area, so the panorama keeps the whole frame.
+  */
+  .pano .psv-navbar {
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    width: auto;
+    height: auto;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.25rem;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 9999px;
+    background: color-mix(in srgb, black 55%, transparent);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+    overflow: hidden;
+  }
+
+  /* `navbar: false` still leaves the element behind — without this it paints as
+     a 10px dot of pill chrome over the sphere. */
+  .pano .psv-navbar:empty {
+    display: none;
+  }
+
+  /*
+    PSV sets `box-sizing: content-box` on the navbar *and* keeps a 10px padding
+    on every button, so a plain `width: 40px` renders a 60px disc with a tiny
+    glyph marooned in the middle. Reset both before sizing anything.
+  */
+  .pano .psv-navbar,
+  .pano .psv-navbar * {
+    box-sizing: border-box;
+  }
+
+  /*
+    PSV anchors its tooltips to the viewer, not the button, so on a floating
+    navbar they land *under* the pill as a grey slab. Four self-evident icons
+    do not need labels — and on a phone a tooltip only ever appears mid-tap.
+  */
+  .pano .psv-tooltip {
+    display: none;
+  }
+
+  .pano .psv-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 9999px;
+    color: rgb(255 255 255 / 0.92);
+    transition: background-color 200ms ease;
+  }
+
+  .pano .psv-button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /*
+    Hover only where a pointer can actually hover — on a touch screen `:hover`
+    latches after a tap and leaves the button filled in, which is what made the
+    gyroscope look permanently pressed.
+  */
+  @media (hover: hover) {
+    .pano .psv-button:hover {
+      background: color-mix(in srgb, hsl(var(--brand-primary)) 26%, transparent);
+    }
+  }
+
+  /* Matches the specificity of the plugin's own `:focus-visible` rule, which
+     would otherwise win the cascade and paint an off-palette blue ring. */
+  .pano .psv-button:not(.psv-button--disabled):focus-visible {
+    background: none;
+    outline: 2px solid hsl(var(--brand-primary));
+    outline-offset: -3px;
+  }
+
+  /* Toggles (gyroscope, fullscreen) tint their glyph rather than their whole disc. */
+  .pano .psv-button.psv-button--active {
+    background: none;
+    color: hsl(var(--brand-primary));
+  }
+
+  /* The settings button carries the accent-coloured badge already, so tinting
+     its glyph the same accent leaves it barely legible — and the hover wash
+     underneath it is the same hue again. Invert the disc instead. */
+  .pano .psv-settings-button.psv-button--active {
+    background: hsl(var(--brand-primary));
+    color: #04121a;
+  }
+
+  .pano .psv-caption {
+    padding-inline: 0.5rem;
+  }
+
+  .pano .psv-caption-content {
+    font-family: var(--type-meta);
+    font-size: 0.625rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.8);
+  }
+
+  .pano .psv-loader-canvas circle + circle {
+    stroke: hsl(var(--brand-primary));
+  }
+
+  /*
+    iPhone Safari has no element Fullscreen API, so PSV emulates it by pinning
+    its own container with `.psv-fullscreen-emulation` at z-index 9999. That
+    z-index is meaningless here: `.pano` sets `isolation: isolate`, which traps
+    it in a stacking context that paints below the sticky header and the hero's
+    caption overlay — the panorama does go full-screen, it is just buried. Lift
+    the whole `.pano` instead, and swap in `dvh` so the collapsing URL bar does
+    not crop the sphere.
+  */
+  .pano:has(.psv-fullscreen-emulation) {
+    isolation: auto;
+    z-index: 60;
+  }
+
+  .pano .psv-fullscreen-emulation {
+    height: 100dvh !important;
+  }
+
+  body:has(.psv-fullscreen-emulation) {
+    overflow: hidden;
+  }
+
+  /*
+    The minimap sits clear of the safe area and gets a border matching the
+    control pill, so the two read as one system rather than two libraries.
+  */
+  .pano .psv-map {
+    top: max(0.75rem, env(safe-area-inset-top));
+    right: max(0.75rem, env(safe-area-inset-right));
+  }
+
+  /* The border goes on the container, which is the element the round shape
+     actually clips — on the outer box it draws a square around a circle. */
+  .pano .psv-map__container {
+    border: 1px solid rgb(255 255 255 / 0.16);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  }
+
+  /* Maximized the plugin drops its own margin to fill the frame; the safe-area
+     inset above would leave it hanging off the opposite edge. */
+  .pano .psv-map--maximized {
+    top: 0;
+    right: 0;
+  }
+
+  /* Enough to place yourself, not enough to bury the sphere. Maximized the map
+     takes over the frame, so the cap only applies to the minimap. */
+  @media (max-width: 480px) {
+    .pano .psv-map:not(.psv-map--maximized) {
+      width: 140px !important;
+      height: 140px !important;
+    }
+  }
+
+  /*
+    The plugin sizes its corner buttons at a fixed 34px, which is a quarter of
+    the minimap's diameter each, and the zoom readout covers the middle of it.
+    Both are built for the 300px map in the plugin's demo. Shrink the buttons and
+    drop the readout while small — pinch and wheel still zoom — and hand
+    everything back at full size once maximized.
+  */
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__button {
+    width: 26px;
+  }
+
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__toolbar {
+    display: none;
+  }
+
+  .pano .psv-map__button {
+    color: rgb(255 255 255 / 0.92);
+  }
+
+  /* The settings panel is the one piece of PSV chrome with real text in it. */
+  .pano .psv-settings {
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, black 78%, transparent);
+    backdrop-filter: blur(14px);
+    overflow: hidden;
+  }
+
+  .pano .psv-settings-item-label,
+  .pano .psv-settings-item-value {
+    font-family: var(--type-meta);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+  }
+
+  /* The badge is absolutely positioned inside a 40px button, and the pill clips
+     what overflows — which is why the resolution ids are kept to a few
+     characters rather than spelled out. */
+  .pano .psv-settings-badge {
+    top: 2px;
+    right: 2px;
+    background: hsl(var(--brand-primary));
+    color: #04121a;
+    font-family: var(--type-meta);
+    font-size: 8px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /*
+    Real fullscreen promotes PSV's own container, so page chrome drops out for
+    free. The emulation has no such power — anything painted over the sphere is
+    still there — so page furniture opts out by hand with `data-pano-chrome`.
+  */
+  body:has(.psv-fullscreen-emulation) [data-pano-chrome] {
+    opacity: 0;
+    pointer-events: none;
+  }
+</style>
+
+<script>
+  /*
+    The plugin stylesheets are imported statically while their code stays
+    dynamic. Importing them alongside the dynamic `import()` emitted <link> tags
+    for CSS chunks the build never wrote — two guaranteed 404s. They are 5 kB
+    together against 68 kB of plugin JS, so only the JS is worth splitting.
+  */
+  import "@photo-sphere-viewer/map-plugin/index.css";
+  import "@photo-sphere-viewer/settings-plugin/index.css";
+
+  import type { Viewer } from "@photo-sphere-viewer/core";
+  // Type-only, so these erase at build time and pull in no chunk.
+  import type { MapPlugin as MapPluginType } from "@photo-sphere-viewer/map-plugin";
+  import type { ResolutionPlugin as ResolutionPluginType } from "@photo-sphere-viewer/resolution-plugin";
+
+  type PanoElement = HTMLElement & { _panoViewer?: Viewer; _panoBoot?: Promise<Viewer | null> };
+
+  /** Cached across every viewer on the page — three.js should load exactly once. */
+  let libraryPromise: Promise<{
+    Viewer: typeof import("@photo-sphere-viewer/core").Viewer;
+    GyroscopePlugin: typeof import("@photo-sphere-viewer/gyroscope-plugin").GyroscopePlugin;
+    AutorotatePlugin: typeof import("@photo-sphere-viewer/autorotate-plugin").AutorotatePlugin;
+  }> | null = null;
+
+  function loadLibrary() {
+    libraryPromise ??= (async () => {
+      const [core, gyro, autorotate] = await Promise.all([
+        import("@photo-sphere-viewer/core"),
+        import("@photo-sphere-viewer/gyroscope-plugin"),
+        import("@photo-sphere-viewer/autorotate-plugin"),
+        import("@photo-sphere-viewer/core/index.css"),
+      ]);
+      return {
+        Viewer: core.Viewer,
+        GyroscopePlugin: gyro.GyroscopePlugin,
+        AutorotatePlugin: autorotate.AutorotatePlugin,
+      };
+    })();
+    return libraryPromise;
+  }
+
+  /*
+    The map and settings/resolution plugins are opt-in per viewer and load in
+    their own chunks. The hero sphere on the home page wants neither, and both
+    ship CSS as well as JS — no reason to make every visitor pay for a minimap
+    they will not see.
+  */
+  let mapPromise: Promise<typeof import("@photo-sphere-viewer/map-plugin").MapPlugin> | null = null;
+
+  function loadMapPlugin() {
+    mapPromise ??= (async () => {
+      const plugin = await import("@photo-sphere-viewer/map-plugin");
+      return plugin.MapPlugin;
+    })();
+    return mapPromise;
+  }
+
+  let resolutionPromise: Promise<{
+    SettingsPlugin: typeof import("@photo-sphere-viewer/settings-plugin").SettingsPlugin;
+    ResolutionPlugin: typeof import("@photo-sphere-viewer/resolution-plugin").ResolutionPlugin;
+  }> | null = null;
+
+  function loadResolutionPlugin() {
+    // ResolutionPlugin throws at init without SettingsPlugin — it is the host
+    // for the quality picker, not an optional companion.
+    resolutionPromise ??= (async () => {
+      const [settings, resolution] = await Promise.all([
+        import("@photo-sphere-viewer/settings-plugin"),
+        import("@photo-sphere-viewer/resolution-plugin"),
+      ]);
+      return { SettingsPlugin: settings.SettingsPlugin, ResolutionPlugin: resolution.ResolutionPlugin };
+    })();
+    return resolutionPromise;
+  }
+
+  /**
+   * The observer and a `pano:load` event can both ask for the same element, and
+   * `build` awaits the library — so a `_panoViewer` check alone leaves a window
+   * where two viewers get mounted into one container. Cache the promise instead.
+   */
+  function boot(el: PanoElement) {
+    // Never cache a src-less attempt: the observer fires before `pano:load`
+    // supplies the URL, and a memoised null would block the real boot.
+    if (!el.dataset.src) return Promise.resolve(null);
+    el._panoBoot ??= build(el);
+    return el._panoBoot;
+  }
+
+  /**
+   * PSV names its buttons with a `title` attribute, which the browser renders as
+   * a native tooltip — a grey system slab that lands on top of the floating pill
+   * mid-tap. Move the name to `aria-label` so screen readers keep it and the
+   * tooltip goes away.
+   */
+  function labelButtons(root: HTMLElement) {
+    for (const button of root.querySelectorAll<HTMLElement>(".psv-button[title]")) {
+      const label = button.title;
+      if (label) button.setAttribute("aria-label", label);
+      button.removeAttribute("title");
+    }
+  }
+
+  async function build(el: PanoElement) {
+    const src = el.dataset.src;
+    if (!src) return null;
+
+    const stage = el.querySelector<HTMLElement>("[data-pano-stage]");
+    const poster = el.querySelector<HTMLElement>("[data-pano-poster]");
+    const hint = el.querySelector<HTMLElement>("[data-pano-hint]");
+    if (!stage) return null;
+
+    const { Viewer, GyroscopePlugin, AutorotatePlugin } = await loadLibrary();
+
+    const [MapPlugin, resolutionLib] = await Promise.all([
+      el.dataset.map === "true" ? loadMapPlugin() : null,
+      el.dataset.resolutions === "true" ? loadResolutionPlugin() : null,
+    ]);
+
+    /** Sitting inside a scrolling page: the page's gestures win over the sphere's. */
+    const embedded = el.dataset.twoFingers === "true";
+
+    // Idle rotation is opt-in, and never runs for reduced-motion users.
+    const autorotate =
+      el.dataset.autorotate === "true" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const viewer = new Viewer({
+      container: stage,
+      panorama: src,
+      caption: el.dataset.caption || undefined,
+      plugins: [
+        GyroscopePlugin,
+        [
+          AutorotatePlugin,
+          { autostartOnIdle: autorotate, autostartDelay: autorotate ? 1500 : null, autorotateSpeed: "1.4rpm" },
+        ],
+        // The minimap is stitched from OSM tiles once coordinates arrive over
+        // `pano:meta`; until then it is hidden below, after construction.
+        ...(MapPlugin
+          ? [
+              MapPlugin.withConfig({
+                size: "170px",
+                // Top left is taken by the back link on /view/, and the bottom
+                // edge belongs to the caption block and the control pill.
+                position: "top right",
+                coneColor: "#22d3ee",
+                pinSize: 24,
+                // North is a promise the data cannot keep: no heading is
+                // recorded, so the cone shows where you are looking relative to
+                // the frame, not to true north.
+                buttons: { north: false },
+              }),
+            ]
+          : []),
+        ...(resolutionLib
+          ? [
+              resolutionLib.SettingsPlugin,
+              // `resolutions` stays null until `pano:meta` names the sizes —
+              // an empty array here would crash the plugin looking for a default.
+              resolutionLib.ResolutionPlugin.withConfig({ resolutions: null!, showBadge: true }),
+            ]
+          : []),
+      ],
+      // Dragging already moves and pinching already zooms, so the arrow pad and
+      // the zoom slider are dead weight on a phone. Caption only when there is one.
+      // An explicit navbar list overrides the defaults entirely, so a plugin's
+      // own button — `settings` here — has to be named or it never appears.
+      navbar: el.dataset.controls === "false"
+        ? false
+        : [
+            "zoomOut",
+            "zoomIn",
+            ...(el.dataset.caption ? ["caption"] : []),
+            ...(resolutionLib ? ["settings"] : []),
+            "gyroscope",
+            "fullscreen",
+          ],
+      touchmoveTwoFingers: embedded,
+      // Embedded in a scrolling page the wheel is off entirely, so a scroll just
+      // scrolls — `mousewheelCtrlKey` would instead nag with a "use ctrl+scroll"
+      // overlay every time. On the full-screen viewer nothing is behind the
+      // sphere, so the wheel zooms directly.
+      mousewheel: !embedded,
+      mousewheelCtrlKey: false,
+      defaultZoomLvl: 35,
+      minFov: 25,
+      maxFov: 100,
+      moveInertia: 0.85,
+      loadingTxt: "",
+      canvasBackground: "#000",
+    });
+
+    el._panoViewer = viewer;
+
+    // The navbar exists as soon as the viewer is constructed; do not wait for
+    // `ready`, which never fires if the panorama itself fails to load.
+    labelButtons(stage);
+
+    // An empty minimap is worse than none, and `visibleOnLoad: false` is the
+    // wrong lever — it *collapses* the map, and a collapsed map skips the render
+    // loop, so the tiles never paint once the image finally lands.
+    viewer.getPlugin<MapPluginType>("map")?.hide();
+
+    /*
+      Picking an option calls the settings *component*'s `hide()` directly rather
+      than the plugin's `hideSettings()`, so the button never learns the menu
+      closed and keeps its active tint for the rest of the session. Clear the
+      flag once the panel is actually gone — the parent "Quality" row opens a
+      submenu and must be left alone. Only the flag: `hideSettings()` would also
+      pull focus back to the button and leave a ring after a plain mouse click.
+    */
+    const panel = stage.querySelector<HTMLElement>(".psv-settings");
+    if (panel) {
+      panel.addEventListener("click", () => {
+        requestAnimationFrame(() => {
+          if (!panel.classList.contains("psv-settings--open")) {
+            viewer.navbar.getButton("settings", false)?.toggleActive(false);
+          }
+        });
+      });
+    }
+
+    viewer.addEventListener("ready", () => {
+      stage.style.opacity = "1";
+      labelButtons(stage);
+      // Hold the poster one beat longer so there is no black flash between them.
+      window.setTimeout(() => poster?.classList.add("opacity-0"), 250);
+
+      if (hint) {
+        hint.hidden = false;
+        const dismiss = () => {
+          hint.style.opacity = "0";
+          el.removeEventListener("pointerdown", dismiss);
+        };
+        el.addEventListener("pointerdown", dismiss, { once: true });
+        window.setTimeout(dismiss, 4500);
+      }
+    });
+
+    return viewer;
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        observer.unobserve(entry.target);
+        void boot(entry.target as PanoElement);
+      }
+    },
+    // Start fetching just before it scrolls in — three.js takes a moment.
+    { rootMargin: "200px 0px" },
+  );
+
+  for (const el of document.querySelectorAll<PanoElement>("[data-pano]")) {
+    observer.observe(el);
+  }
+
+  /**
+   * Metadata arrives after the sphere is already turning — the viewer boots from
+   * a URL the page can build from `?id=` alone, while coordinates and file sizes
+   * come from a separate archive request. So the map and the quality picker are
+   * filled in by their own event rather than being part of `pano:load`.
+   */
+  document.addEventListener("pano:meta", async (event: Event) => {
+    const { target, lat, lon, resolutions } = (event as CustomEvent).detail as {
+      target: string;
+      lat?: number | null;
+      lon?: number | null;
+      resolutions?: Array<{ id: string; label: string; panorama: string }>;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    // `_panoBoot` rather than `_panoViewer`: metadata usually lands while the
+    // viewer is still constructing, and awaiting the promise is the only way to
+    // avoid dropping it on the floor.
+    const viewer = await (el._panoBoot ?? Promise.resolve(el._panoViewer ?? null));
+    if (!viewer) return;
+
+    if (resolutions?.length) {
+      const plugin = viewer.getPlugin<ResolutionPluginType>("resolution");
+      // Leave the default alone: the first entry is the texture already loaded,
+      // and naming it would reload the same image.
+      plugin?.setResolutions(resolutions);
+    }
+
+    if (lat != null && lon != null) {
+      const plugin = viewer.getPlugin<MapPluginType>("map");
+      if (plugin) {
+        const { buildStaticMap } = await import("@/lib/staticmap");
+        const map = await buildStaticMap(lat, lon);
+        // Null means every tile failed — a blocked host or no network. The
+        // panorama is unaffected, so leave the map hidden and say nothing.
+        if (map) {
+          plugin.setImage(map.url, map.center);
+          plugin.show();
+        }
+      }
+    }
+  });
+
+  // Let other scripts (the gallery's lightbox) drive a viewer directly.
+  document.addEventListener("pano:load", (event: Event) => {
+    const { target, src, caption } = (event as CustomEvent).detail as {
+      target: string;
+      src: string;
+      caption?: string;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+    el.dataset.src = src;
+    if (caption !== undefined) el.dataset.caption = caption;
+    if (el._panoViewer) {
+      void el._panoViewer.setPanorama(src, { caption, transition: { effect: "fade" } });
+    } else {
+      void boot(el);
+    }
+  });
+</script>

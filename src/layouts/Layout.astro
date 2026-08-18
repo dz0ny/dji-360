@@ -1,0 +1,237 @@
+---
+import { Font } from "astro:assets";
+import "../index.css";
+import { Schema } from "astro-seo-schema";
+import type { Thing, WithContext } from "schema-dts";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SOCIAL_IMAGE } from "@/config";
+import DirectionSwitch from "@/components/DirectionSwitch.astro";
+
+interface Props {
+	title?: string;
+	description?: string;
+	noindex?: boolean;
+	socialImageUrl?: string;
+	schema?: WithContext<Thing> | WithContext<Thing>[];
+	/** Which design direction to render. Overridable so /branding/ can show all three. */
+	direction?: "dark-room" | "flight-log" | "paper-sky";
+	/** Chromeless pages (the sphere viewer) hide the header and let the canvas own the screen. */
+	bare?: boolean;
+}
+
+const { url } = Astro;
+const {
+	title: pageTitle,
+	description = SITE_DESCRIPTION,
+	noindex = false,
+	socialImageUrl,
+	schema,
+	direction = "dark-room",
+	bare = false,
+} = Astro.props;
+
+const title = pageTitle ? `${pageTitle} | ${SITE_NAME}` : `${SITE_NAME} — ${SITE_TAGLINE}`;
+
+/* Always emit a card image — the sane default for a photography site. */
+const socialImage = new URL(socialImageUrl ?? SOCIAL_IMAGE, url).href;
+
+const nav = [
+	{ href: "/", label: "Gallery" },
+	{ href: "/admin/", label: "Upload" },
+];
+---
+
+<!doctype html>
+<html lang="en" data-direction={direction}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1015" />
+    {/* Applied before first paint so a stored theme never flashes the default one. */}
+    <script is:inline>
+      try {
+        const stored = localStorage.getItem("direction");
+        if (stored === "dark-room" || stored === "flight-log" || stored === "paper-sky") {
+          document.documentElement.dataset.direction = stored;
+        }
+      } catch {}
+    </script>
+    <link rel="canonical" href={url.href} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url.href} />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:alt" content={title} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+
+    <Font cssVariable="--font-bricolage" preload />
+    <Font cssVariable="--font-public" preload />
+    <Font cssVariable="--font-jetbrains" />
+    <Font cssVariable="--font-fraunces" />
+
+    {schema && (Array.isArray(schema)
+      ? schema.map((s) => <Schema item={s} />)
+      : <Schema item={schema} />
+    )}
+  </head>
+
+  <body class="min-h-dvh bg-background text-foreground flex flex-col">
+    {!bare && (
+      <header class="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
+        <div class="relative mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-[var(--spacing-gutter)] py-3">
+          <a href="/" class="group flex items-baseline gap-2.5">
+            <span class="font-display text-[1.0625rem] font-extrabold tracking-tight">{SITE_NAME}</span>
+            <span class="hidden font-mono text-[0.6875rem] uppercase tracking-[0.18em] text-muted-foreground sm:inline">
+              {SITE_TAGLINE}
+            </span>
+          </a>
+
+          {/*
+            One nav for both breakpoints rather than a duplicate mobile copy:
+            below `sm` it is a panel dropped under the header bar, above it the
+            same element is the inline row. A second copy would mean two sets of
+            theme buttons and two `aria-current` links in the accessibility tree.
+          */}
+          <button
+            type="button"
+            data-menu-toggle
+            aria-expanded="false"
+            aria-controls="site-nav"
+            aria-label="Menu"
+            class="group -mr-2 inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground sm:hidden"
+          >
+            <svg
+              class="size-5 group-data-[open]:hidden"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+            <svg
+              class="hidden size-5 group-data-[open]:block"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+
+          <nav
+            id="site-nav"
+            data-menu-panel
+            aria-label="Main"
+            class="absolute inset-x-0 top-full hidden flex-col gap-1 border-b border-border/70 bg-background px-[var(--spacing-gutter)] pb-4 pt-2 shadow-soft data-[open]:flex sm:static sm:flex sm:flex-row sm:items-center sm:gap-1 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none"
+          >
+            {nav.map(({ href, label }) => (
+              <a
+                href={href}
+                aria-current={url.pathname === href ? "page" : undefined}
+                class="flex min-h-11 items-center rounded-md px-3 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:text-brand-primary sm:min-h-0 sm:py-2"
+              >
+                {label}
+              </a>
+            ))}
+
+            <div class="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-3 sm:mt-0 sm:border-0 sm:pt-0">
+              <span class="px-3 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground sm:hidden">
+                Theme
+              </span>
+              <DirectionSwitch />
+            </div>
+          </nav>
+        </div>
+      </header>
+    )}
+
+    <main class="flex-1">
+      <slot />
+    </main>
+
+    {!bare && (
+      <footer class="border-t border-border/70 px-[var(--spacing-gutter)] py-8">
+        <div class="mx-auto flex max-w-[1600px] flex-col gap-1 text-center font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground sm:flex-row sm:justify-between sm:text-left">
+          <span>{SITE_NAME}</span>
+          <span>Equirectangular</span>
+        </div>
+      </footer>
+    )}
+
+    <script>
+      /*
+        Mobile menu. Native JS rather than an island: it is one boolean, and the
+        panel is already in the DOM at both breakpoints — `data-open` only drives
+        the `sm:`-and-below dropdown, so leaving it set while resizing up is
+        harmless.
+      */
+      const menuToggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]");
+      const menuPanel = document.querySelector<HTMLElement>("[data-menu-panel]");
+
+      if (menuToggle && menuPanel) {
+        const setMenu = (open: boolean) => {
+          menuPanel.toggleAttribute("data-open", open);
+          menuToggle.toggleAttribute("data-open", open);
+          menuToggle.setAttribute("aria-expanded", String(open));
+        };
+
+        menuToggle.addEventListener("click", () => setMenu(!menuPanel.hasAttribute("data-open")));
+
+        // A tap anywhere else closes it — including on the panorama behind it.
+        document.addEventListener("click", (event) => {
+          const target = event.target as Node;
+          if (menuPanel.contains(target) || menuToggle.contains(target)) return;
+          setMenu(false);
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          setMenu(false);
+          menuToggle.focus();
+        });
+
+        // Navigating away or picking a theme both mean the menu has done its job.
+        menuPanel.addEventListener("click", (event) => {
+          if ((event.target as HTMLElement).closest("a, [data-set-direction]")) setMenu(false);
+        });
+      }
+    </script>
+
+    <script>
+      // MOTION: one IntersectionObserver drives every scroll-reveal on the page.
+      // Elements start hidden via `.reveal` in CSS and are shown once, in order.
+      const revealables = document.querySelectorAll<HTMLElement>(".reveal");
+      if (revealables.length) {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          for (const el of revealables) el.classList.add("is-visible");
+        } else {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                entry.target.classList.add("is-visible");
+                observer.unobserve(entry.target);
+              }
+            },
+            { rootMargin: "0px 0px -8% 0px", threshold: 0.05 },
+          );
+          for (const el of revealables) observer.observe(el);
+        }
+      }
+    </script>
+  </body>
+</html>

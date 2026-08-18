@@ -1,0 +1,298 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import PanoViewer from "@/components/PanoViewer.astro";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/config";
+import type { WithContext, ImageGallery } from "schema-dts";
+
+const schema: WithContext<ImageGallery> = {
+	"@context": "https://schema.org",
+	"@type": "ImageGallery",
+	name: SITE_NAME,
+	description: SITE_DESCRIPTION,
+	url: SITE_URL,
+};
+---
+
+<Layout title="Gallery" description={SITE_DESCRIPTION} schema={schema}>
+  {/*
+    Signature move: split-stage hero. The newest panorama fills the screen and
+    is already turning, with the title block anchored bottom-left against a
+    monospace stat rail bottom-right — never a centred hero (VARIANCE 6).
+  */}
+  <section class="relative" aria-labelledby="hero-title">
+    <PanoViewer
+      id="hero-pano"
+      class="h-[58dvh] min-h-[360px] w-full sm:h-[72dvh]"
+      twoFingers={true}
+      autorotate={true}
+      controls={false}
+    >
+      <img
+        data-hero-poster
+        alt=""
+        aria-hidden="true"
+        class="h-full w-full scale-105 object-cover opacity-0 blur-lg transition-opacity duration-500"
+      />
+    </PanoViewer>
+
+    <div
+      class="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/70 to-transparent pt-24"
+    >
+      <div
+        class="mx-auto flex max-w-[1600px] flex-col gap-4 px-[var(--spacing-gutter)] pb-6 sm:flex-row sm:items-end sm:justify-between sm:gap-10"
+      >
+        <div class="max-w-2xl">
+          <p
+            class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary animate-rise"
+            data-hero-eyebrow
+          >
+            Latest
+          </p>
+          <h1
+            id="hero-title"
+            class="mt-2 font-display text-[clamp(2rem,7vw,4.25rem)] font-extrabold leading-[0.95] tracking-[-0.03em] animate-rise [animation-delay:120ms]"
+            data-hero-title
+          >
+            <span class="inline-block h-[0.8em] w-[7ch] animate-pulse rounded bg-muted align-middle"></span>
+          </h1>
+          <p
+            class="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground animate-rise [animation-delay:220ms] sm:text-base"
+          >
+            {SITE_DESCRIPTION}
+          </p>
+        </div>
+
+        <dl
+          class="pointer-events-auto grid shrink-0 grid-cols-3 gap-x-4 gap-y-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] animate-rise [animation-delay:320ms] sm:gap-x-6 sm:grid-cols-1 sm:text-right"
+        >
+          <div class="sm:contents">
+            <dt class="text-muted-foreground">Panoramas</dt>
+            <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-count>—</dd>
+          </div>
+          <div class="sm:contents sm:mt-2">
+            <dt class="text-muted-foreground">Newest</dt>
+            <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-newest>—</dd>
+          </div>
+          <div class="sm:contents sm:mt-2">
+            <dt class="text-muted-foreground">Located</dt>
+            <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-located>—</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-[1600px] px-[var(--spacing-gutter)] pb-[var(--spacing-section)] pt-10" aria-labelledby="archive-title">
+    <div class="mb-6 flex items-baseline justify-between gap-4 border-b border-border/70 pb-4">
+      <h2 id="archive-title" class="font-display text-xl font-extrabold tracking-tight sm:text-2xl">
+        The archive
+      </h2>
+      <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-archive-hint>
+        Loading
+      </p>
+    </div>
+
+    {/* Skeleton — replaced wholesale once the API responds. */}
+    <div class="grid gap-[var(--spacing-gutter)] sm:grid-cols-2 xl:grid-cols-3" data-gallery>
+      <div class="aspect-pano animate-pulse rounded-lg bg-muted sm:col-span-2 xl:col-span-2"></div>
+      <div class="aspect-pano animate-pulse rounded-lg bg-muted"></div>
+      <div class="aspect-pano animate-pulse rounded-lg bg-muted"></div>
+    </div>
+
+    <div class="hidden" data-gallery-empty>
+      <div class="rounded-lg border border-dashed border-border py-20 text-center">
+        <p class="font-display text-2xl font-extrabold tracking-tight">Nothing up here yet</p>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+          The archive is empty. Sign in and drop the first panorama in.
+        </p>
+        <a
+          href="/admin/"
+          class="mt-6 inline-flex min-h-11 items-center rounded-md bg-primary px-5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          Upload a panorama
+        </a>
+      </div>
+    </div>
+
+    <p class="hidden text-sm text-destructive" data-gallery-error role="alert"></p>
+  </section>
+</Layout>
+
+<script>
+  import {
+    displayTitle,
+    escapeHtml,
+    fetchPhotos,
+    formatCoords,
+    formatDate,
+    photoDate,
+    viewUrl,
+    type Photo,
+  } from "@/lib/photos";
+
+  const gallery = document.querySelector<HTMLElement>("[data-gallery]");
+  const empty = document.querySelector<HTMLElement>("[data-gallery-empty]");
+  const errorBox = document.querySelector<HTMLElement>("[data-gallery-error]");
+  const hint = document.querySelector<HTMLElement>("[data-archive-hint]");
+
+  /**
+   * VARIANCE 6: the newest frame takes a double-wide cell so the grid never
+   * settles into three equal boxes, and every fourth card widens again to keep
+   * the rhythm going down a long archive.
+   */
+  function cellSpan(index: number): string {
+    return index === 0 || index % 7 === 4 ? "sm:col-span-2 xl:col-span-2" : "";
+  }
+
+  /**
+   * Cards show the horizon crop, not the sphere: a full equirectangular squashed
+   * into a card is a smear with two stretched poles. Uploads from before the
+   * crop existed have no `covers/` object, so each card falls back to its 2:1
+   * thumb on the first error.
+   */
+  function coverFallback(root: HTMLElement) {
+    for (const img of root.querySelectorAll<HTMLImageElement>("img[data-fallback]")) {
+      img.addEventListener(
+        "error",
+        () => {
+          const fallback = img.dataset.fallback;
+          if (fallback) img.src = fallback;
+        },
+        { once: true },
+      );
+    }
+  }
+
+  /**
+   * The image box carries `h-full` as well as `aspect-pano`: a double-wide cell
+   * makes its grid row taller than 2:1, and a fixed-ratio box would leave dead
+   * card background under the narrow neighbours. The ratio still governs
+   * whenever a row is uniform (mobile, and rows without a wide card).
+   */
+  function card(photo: Photo, index: number): string {
+    const title = escapeHtml(displayTitle(photo));
+    const coords = escapeHtml(formatCoords(photo));
+    const date = escapeHtml(formatDate(photo));
+
+    return `
+      <a
+        href="${viewUrl(photo.id)}"
+        class="reveal group relative block h-full overflow-hidden rounded-lg bg-card shadow-soft ${cellSpan(index)}"
+        style="transition-delay:${Math.min(index, 6) * 60}ms"
+      >
+        <div class="aspect-pano h-full w-full overflow-hidden">
+          <img
+            src="${photo.cover}"
+            data-fallback="${photo.thumb}"
+            alt="360° panorama — ${title}"
+            width="1200"
+            height="630"
+            loading="${index < 2 ? "eager" : "lazy"}"
+            decoding="async"
+            class="h-full w-full object-cover transition-transform duration-700 ease-out will-change-transform group-hover:scale-[1.04]"
+          />
+        </div>
+        <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
+        <div class="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4">
+          <div class="min-w-0">
+            <h3 class="truncate font-display text-base font-extrabold tracking-tight text-white sm:text-lg">${title}</h3>
+            <p class="mt-0.5 truncate font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white/70">
+              ${date}${coords ? ` · ${coords}` : ""}
+            </p>
+          </div>
+          <span
+            aria-hidden="true"
+            class="grid size-9 shrink-0 place-items-center rounded-full bg-white/12 font-mono text-[0.5625rem] uppercase tracking-[0.1em] text-white backdrop-blur-md transition-colors group-hover:bg-brand-primary group-hover:text-brand-accent-foreground"
+          >360</span>
+        </div>
+      </a>`;
+  }
+
+  function paintHero(photo: Photo) {
+    const poster = document.querySelector<HTMLImageElement>("[data-hero-poster]");
+    if (poster) {
+      poster.src = photo.thumb;
+      poster.classList.remove("opacity-0");
+    }
+
+    const title = document.querySelector<HTMLElement>("[data-hero-title]");
+    if (title) title.textContent = displayTitle(photo);
+
+    const eyebrow = document.querySelector<HTMLElement>("[data-hero-eyebrow]");
+    const coords = formatCoords(photo);
+    if (eyebrow) eyebrow.textContent = coords ? `Latest · ${coords}` : "Latest";
+
+    // Hand the URL to PanoViewer, which boots three.js on demand.
+    document.dispatchEvent(
+      new CustomEvent("pano:load", {
+        detail: { target: "#hero-pano", src: photo.preview, caption: displayTitle(photo) },
+      }),
+    );
+  }
+
+  function paintStats(photos: Photo[]) {
+    const newest = photos[0] ? photoDate(photos[0]) : null;
+    const located = photos.filter((p) => p.lat != null && p.lon != null).length;
+
+    const set = (selector: string, value: string) => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) el.textContent = value;
+    };
+
+    set("[data-stat-count]", String(photos.length));
+    set("[data-stat-newest]", newest ? newest.toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—");
+    set("[data-stat-located]", `${located}/${photos.length}`);
+  }
+
+  /** Cards arrive after the layout's observer ran, so give them their own. */
+  function observeReveals(root: HTMLElement) {
+    const targets = root.querySelectorAll<HTMLElement>(".reveal");
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      for (const el of targets) el.classList.add("is-visible");
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { rootMargin: "0px 0px -6% 0px", threshold: 0.05 },
+    );
+    for (const el of targets) observer.observe(el);
+  }
+
+  async function load() {
+    if (!gallery) return;
+    try {
+      const photos = await fetchPhotos();
+      paintStats(photos);
+
+      if (photos.length === 0) {
+        gallery.classList.add("hidden");
+        empty?.classList.remove("hidden");
+        if (hint) hint.textContent = "Empty";
+        const heroTitle = document.querySelector<HTMLElement>("[data-hero-title]");
+        if (heroTitle) heroTitle.textContent = "Nothing up here yet";
+        return;
+      }
+
+      paintHero(photos[0]);
+      gallery.innerHTML = photos.map(card).join("");
+      coverFallback(gallery);
+      observeReveals(gallery);
+      if (hint) hint.textContent = `${photos.length} panorama${photos.length === 1 ? "" : "s"}`;
+    } catch (error) {
+      gallery.classList.add("hidden");
+      if (hint) hint.textContent = "Unavailable";
+      if (errorBox) {
+        errorBox.textContent = error instanceof Error ? error.message : "Could not load the archive.";
+        errorBox.classList.remove("hidden");
+      }
+    }
+  }
+
+  void load();
+</script>
