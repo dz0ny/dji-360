@@ -3,11 +3,14 @@
  *
  * Handles requests before serving static assets from the Astro build.
  * `run_worker_first` in wrangler.toml decides what reaches this code — the
- * `/~*` API and image paths. Everything else is served straight from `dist/` by
- * Cloudflare's asset layer and never enters the worker.
+ * `/~*` API and image paths, plus `/p/*`, the share URL for a single panorama,
+ * which needs its `<head>` rewritten per photo and so cannot be a static file.
+ * Everything else is served straight from `dist/` by Cloudflare's asset layer
+ * and never enters the worker.
  */
 
 import { handleApi, handleImage } from './photos.js';
+import { handlePano } from './pano.js';
 
 /**
  * Route handlers map
@@ -16,6 +19,7 @@ import { handleApi, handleImage } from './photos.js';
 const ROUTES = {
 	'/~/api/': { handler: handleApi, description: 'Panorama JSON API' },
 	'/~/img/': { handler: handleImage, description: 'Panorama image delivery' },
+	'/p/': { handler: handlePano, description: 'Per-panorama share page' },
 };
 
 /**

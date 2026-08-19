@@ -15,7 +15,16 @@ export interface Photo {
 	uploadedAt: string;
 	lat: number | null;
 	lon: number | null;
+	/** Metres above the take-off point. */
 	altitude: number | null;
+	/** Metres above sea level, when the camera recorded it. */
+	altitudeAmsl: number | null;
+	/**
+	 * Compass bearing of the centre of the frame. Null until the camera supplies
+	 * it or someone aligns the sphere by hand — the peak labels stay off until
+	 * then, because a guessed heading labels the wrong mountain.
+	 */
+	heading: number | null;
 	width: number | null;
 	height: number | null;
 	/** Bytes of the stored full-size image. */
@@ -29,6 +38,9 @@ export interface Photo {
 	/** 1200×630 horizon crop that reads as a photograph. Absent on older uploads. */
 	cover: string;
 	preview: string;
+	/** 8192px middle rung. Null when the capture was too small to warrant one. */
+	large: string | null;
+	largeBytes: number | null;
 	original: string;
 }
 
@@ -86,6 +98,13 @@ export function escapeHtml(value: string): string {
 		.replace(/'/g, "&#39;");
 }
 
+/**
+ * The canonical, shareable address of one panorama.
+ *
+ * Served by `worker/pano.js`, which reuses the prerendered `/view/` shell but
+ * rewrites the head with this photo's title and cover — a query string on a
+ * static page cannot carry a link preview.
+ */
 export function viewUrl(id: string): string {
-	return `/view/?id=${encodeURIComponent(id)}`;
+	return `/p/${encodeURIComponent(id)}/`;
 }

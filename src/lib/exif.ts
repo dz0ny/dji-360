@@ -13,10 +13,24 @@ export interface PanoMetadata {
 	capturedAt?: string;
 	lat?: number;
 	lon?: number;
+	/** Height above the take-off point, in metres — what a drone shot actually means by "altitude". */
 	altitude?: number;
+	/** GPS altitude above sea level, kept separately because peak labels need an absolute datum. */
+	altitudeAmsl?: number;
+	/**
+	 * Compass bearing, in degrees, of the *centre* of the equirectangular frame.
+	 * Without it the sphere has no idea which way it is facing, so nothing can be
+	 * labelled; with it, every direction in the image is known.
+	 */
+	heading?: number;
 	camera?: string;
 	width?: number;
 	height?: number;
+}
+
+/** Bearings are compared and averaged all over the place; keep them in [0, 360). */
+export function normalizeHeading(value: number): number {
+	return ((value % 360) + 360) % 360;
 }
 
 const HEADER_BYTES = 256 * 1024;
@@ -166,8 +180,15 @@ function parseExif(view: DataView): PanoMetadata {
 					const altitude = asNumbers(gps[0x0006])[0];
 					if (Number.isFinite(altitude)) {
 						// GPSAltitudeRef 1 means "below sea level".
-						meta.altitude = asNumbers(gps[0x0005])[0] === 1 ? -altitude : altitude;
+						meta.altitudeAmsl = asNumbers(gps[0x0005])[0] === 1 ? -altitude : altitude;
+						meta.altitude = meta.altitudeAmsl;
 					}
+
+					// GPSImgDirection is where the camera pointed. On a stitched sphere
+					// that is the centre of the frame, which is exactly the reference
+					// the marker layer needs.
+					const direction = asNumbers(gps[0x0011])[0];
+					if (Number.isFinite(direction)) meta.heading = normalizeHeading(direction);
 				}
 
 				return meta;
@@ -202,6 +223,23 @@ function parseXmp(bytes: Uint8Array): Partial<PanoMetadata> {
 	const out: Partial<PanoMetadata> = {};
 	const relative = Number(pick("drone-dji:RelativeAltitude"));
 	if (Number.isFinite(relative) && relative !== 0) out.altitude = relative;
+
+	const absolute = Number(pick("drone-dji:AbsoluteAltitude"));
+	if (Number.isFinite(absolute) && absolute !== 0) out.altitudeAmsl = absolute;
+
+	/*
+	  Heading, best source first. GPano is written by the stitcher and describes
+	  the finished sphere, which is the thing being labelled; the DJI yaw fields
+	  describe the aircraft and only coincide with the frame centre because that
+	  is where the stitch starts. Yaw is signed (-180…180), so it is normalized.
+	*/
+	for (const name of ["GPano:PoseHeadingDegrees", "drone-dji:GimbalYawDegree", "drone-dji:FlightYawDegree"]) {
+		const raw = Number(pick(name));
+		if (Number.isFinite(raw) && raw !== 0) {
+			out.heading = normalizeHeading(raw);
+			break;
+		}
+	}
 
 	const lat = Number(pick("drone-dji:GpsLatitude") ?? pick("drone-dji:Latitude"));
 	const lon = Number(pick("drone-dji:GpsLongitude") ?? pick("drone-dji:Longitude"));

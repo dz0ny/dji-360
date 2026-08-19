@@ -67,7 +67,9 @@ export default defineConfig({
       cssVariable: "--font-bricolage",
       weights: ["400 800"],
       styles: ["normal"],
-      subsets: ["latin"],
+      // Slovenian and Croatian place names are all over this archive — without
+      // latin-ext, č/š/ž/ć/đ drop to the fallback font mid-word.
+      subsets: ["latin", "latin-ext"],
       fallbacks: ["ui-sans-serif", "system-ui", "sans-serif"],
     },
     {
@@ -76,7 +78,7 @@ export default defineConfig({
       cssVariable: "--font-fraunces",
       weights: ["300 700"],
       styles: ["normal"],
-      subsets: ["latin"],
+      subsets: ["latin", "latin-ext"],
       fallbacks: ["Georgia", "serif"],
     },
     {
@@ -85,7 +87,7 @@ export default defineConfig({
       cssVariable: "--font-public",
       weights: ["300 700"],
       styles: ["normal"],
-      subsets: ["latin"],
+      subsets: ["latin", "latin-ext"],
       fallbacks: ["ui-sans-serif", "system-ui", "sans-serif"],
     },
     {
@@ -94,7 +96,7 @@ export default defineConfig({
       cssVariable: "--font-jetbrains",
       weights: ["400 700"],
       styles: ["normal"],
-      subsets: ["latin"],
+      subsets: ["latin", "latin-ext"],
       fallbacks: ["ui-monospace", "monospace"],
     },
   ],

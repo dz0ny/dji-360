@@ -3,35 +3,97 @@ import Layout from "@/layouts/Layout.astro";
 import PanoViewer from "@/components/PanoViewer.astro";
 
 /*
-  Chromeless viewer. The page is prerendered and reads `?id=` on the client, so
-  the sphere starts loading from the constructed image URL immediately rather
-  than waiting on the archive listing — the title and coordinates fill in a
-  moment later.
+  Chromeless viewer. The page is prerendered and reads the id off the URL on the
+  client (`/p/<id>/`, or the legacy `?id=`), so the sphere starts loading from
+  the constructed image URL immediately rather than waiting on the archive
+  listing — the title and coordinates fill in a moment later.
+
+  `worker/pano.js` serves this same HTML for every `/p/<id>/`, rewriting the head
+  so a shared link previews as that photo. The `noindex` below therefore applies
+  only to the bare shell — the worker drops it on a real panorama.
+
+  Moving between panoramas never reloads the page: the sphere is a three.js
+  scene that costs a second to rebuild, so ‹ / › swap the texture and push a new
+  URL instead.
 */
 ---
 
 <Layout title="Viewer" noindex bare>
-  <div class="relative h-dvh w-full bg-black">
+  <div class="relative h-dvh w-full overflow-hidden bg-black">
     {/* One finger looks around here: nothing behind this page needs scrolling.
         Sized with h-full rather than `absolute inset-0` — the component root is
         already `relative`, and Tailwind's stylesheet order makes that win over a
         caller's `absolute`, which would collapse the sphere to zero height. */}
-    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions />
+    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers />
 
     <div
       data-pano-chrome
       class="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 to-transparent pb-12 transition-opacity duration-300"
       style="padding-top:max(0.75rem, env(safe-area-inset-top))"
     >
-      <div class="flex items-start gap-3 px-3">
-        <a
-          href="/"
-          class="pointer-events-auto inline-flex min-h-11 items-center gap-2 rounded-full bg-black/45 px-4 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white backdrop-blur-md transition-colors hover:bg-black/70"
-        >
+      {/* Everything stays on the left: the minimap owns the top-right corner. */}
+      <div class="flex flex-wrap items-center gap-1.5 px-3">
+        <a href="/" class="view-chip">
           <span aria-hidden="true">←</span> Gallery
         </a>
+
+        {/* Keyboard equivalents are [ and ] — the arrow keys belong to the sphere. */}
+        <button type="button" class="view-chip view-chip--icon" data-view-prev aria-label="Previous panorama" hidden>
+          <span aria-hidden="true">‹</span>
+        </button>
+        <button type="button" class="view-chip view-chip--icon" data-view-next aria-label="Next panorama" hidden>
+          <span aria-hidden="true">›</span>
+        </button>
+
+        <button type="button" class="view-chip" data-view-peaks aria-pressed="false" aria-controls="peaks-panel" hidden>
+          Peaks
+        </button>
       </div>
     </div>
+
+    <aside
+      id="peaks-panel"
+      data-pano-chrome
+      class="absolute right-0 top-0 z-30 flex h-full w-full max-w-xs translate-x-full flex-col border-l border-white/10 bg-black/80 backdrop-blur-xl transition-transform duration-300 data-[open]:translate-x-0 sm:max-w-sm"
+      style="padding-top:max(4.5rem, calc(env(safe-area-inset-top) + 4rem))"
+      hidden
+    >
+      <header class="flex items-baseline justify-between gap-3 px-4 pb-3">
+        <h2 class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-white/60">Named summits</h2>
+        <button type="button" class="view-chip view-chip--icon" data-peaks-close aria-label="Close the summit list">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+
+      <p class="px-4 pb-3 font-mono text-[0.5625rem] uppercase leading-relaxed tracking-[0.14em] text-white/45" data-peaks-status></p>
+
+      <ol class="min-h-0 flex-1 overflow-y-auto px-2 pb-6" data-peaks-list></ol>
+
+      {/*
+        Labels can only be placed on the sphere if we know which way the frame
+        faces. Cameras that record it need nothing; for the rest, whoever owns
+        the archive lines the labels up by eye once and it is stored for good.
+      */}
+      <form class="border-t border-white/10 px-4 py-3" data-peaks-calibrate hidden>
+        <label class="flex items-center justify-between font-mono text-[0.5625rem] uppercase tracking-[0.14em] text-white/60">
+          Frame centre faces
+          <output class="text-white/90" data-peaks-heading-out></output>
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="359"
+          step="1"
+          value="0"
+          class="mt-2 w-full accent-[hsl(var(--brand-primary))]"
+          data-peaks-heading
+        />
+        <div class="mt-2 flex items-center gap-2">
+          <button type="submit" class="view-chip flex-1 justify-center">Save north</button>
+          <span class="font-mono text-[0.5rem] uppercase tracking-[0.14em] text-white/40" data-peaks-save-status></span>
+        </div>
+      </form>
+    </aside>
 
     <div
       data-pano-chrome
@@ -58,17 +120,129 @@ import PanoViewer from "@/components/PanoViewer.astro";
   </div>
 </Layout>
 
-<script>
-  import { API } from "@/config";
-  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl } from "@/lib/photos";
+<style>
+  /* One pill shape for every control in the top bar, so the row reads as a set. */
+  .view-chip {
+    display: inline-flex;
+    /* The gradient behind them is click-through; the controls are not. */
+    pointer-events: auto;
+    align-items: center;
+    gap: 0.375rem;
+    min-height: 2.75rem;
+    padding-inline: 0.875rem;
+    border-radius: 9999px;
+    background: rgb(0 0 0 / 0.45);
+    backdrop-filter: blur(12px);
+    font-family: var(--type-meta);
+    font-size: 0.625rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: white;
+    transition: background-color 200ms ease;
+  }
 
-  const params = new URLSearchParams(window.location.search);
-  const id = params.get("id") ?? "";
+  .view-chip:hover {
+    background: rgb(0 0 0 / 0.7);
+  }
+
+  .view-chip[aria-pressed="true"] {
+    background: hsl(var(--brand-primary) / 0.9);
+    color: black;
+  }
+
+  .view-chip[disabled] {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+
+  .view-chip--icon {
+    min-width: 2.75rem;
+    padding-inline: 0;
+    justify-content: center;
+    font-size: 1.125rem;
+    letter-spacing: 0;
+  }
+
+</style>
+
+<style is:global>
+  /*
+    These rows are built in JavaScript, so Astro's scoped attribute is never
+    stamped on them and a scoped rule would never match. Global, then, but
+    namespaced by the panel that owns them.
+  */
+  #peaks-panel .peak-row {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    text-align: left;
+    transition: background-color 150ms ease;
+  }
+
+  #peaks-panel button.peak-row:hover {
+    background: rgb(255 255 255 / 0.08);
+  }
+
+  #peaks-panel .peak-row__name {
+    font-size: 0.8125rem;
+    color: rgb(255 255 255 / 0.92);
+  }
+
+  #peaks-panel .peak-row__meta {
+    flex-shrink: 0;
+    font-family: var(--type-meta);
+    font-size: 0.5625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.5);
+  }
+</style>
+
+<script>
+  import { API, SITE_NAME } from "@/config";
+  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl } from "@/lib/photos";
+  import type { Photo } from "@/lib/photos";
+  import { fetchPeaks, formatDistance, placePeaks, spherePosition } from "@/lib/peaks";
+  import type { PeaksPayload, PlacedPeak } from "@/lib/peaks";
+
+  const ID_RE = /^[a-z0-9][a-z0-9-]{4,63}$/;
+
+  /*
+    The id arrives in the path on the shareable `/p/<id>/` URL, which the worker
+    serves from this very shell. `?id=` is the older form and still works —
+    links to it get rewritten in place so what the reader copies out of the
+    address bar is the URL that previews properly.
+  */
+  function idFromLocation(): string {
+    const fromPath = window.location.pathname.match(/^\/p\/([^/]+)\/?$/)?.[1] ?? "";
+    return fromPath ? decodeURIComponent(fromPath) : (new URLSearchParams(window.location.search).get("id") ?? "");
+  }
 
   const titleEl = document.querySelector<HTMLElement>("[data-view-title]");
   const metaEl = document.querySelector<HTMLElement>("[data-view-meta]");
   const descEl = document.querySelector<HTMLElement>("[data-view-description]");
   const errorEl = document.querySelector<HTMLElement>("[data-view-error]");
+  const prevEl = document.querySelector<HTMLButtonElement>("[data-view-prev]");
+  const nextEl = document.querySelector<HTMLButtonElement>("[data-view-next]");
+  const peaksToggle = document.querySelector<HTMLButtonElement>("[data-view-peaks]");
+  const panelEl = document.querySelector<HTMLElement>("#peaks-panel");
+  const peaksListEl = document.querySelector<HTMLElement>("[data-peaks-list]");
+  const peaksStatusEl = document.querySelector<HTMLElement>("[data-peaks-status]");
+  const calibrateEl = document.querySelector<HTMLFormElement>("[data-peaks-calibrate]");
+  const headingInput = document.querySelector<HTMLInputElement>("[data-peaks-heading]");
+  const headingOut = document.querySelector<HTMLOutputElement>("[data-peaks-heading-out]");
+  const saveStatusEl = document.querySelector<HTMLElement>("[data-peaks-save-status]");
+
+  let photos: Photo[] = [];
+  let current: Photo | null = null;
+  let placed: PlacedPeak[] = [];
+  /** The heading being previewed, which is the stored one until an admin drags. */
+  let heading: number | null = null;
+  let isAdmin = false;
 
   function showError(message: string) {
     if (!errorEl) return;
@@ -77,9 +251,303 @@ import PanoViewer from "@/components/PanoViewer.astro";
     errorEl.classList.add("grid");
   }
 
-  if (!/^[a-z0-9][a-z0-9-]{4,63}$/.test(id)) {
+  /** Only ever asked once, and a failure just means "not an editor". */
+  async function checkAdmin() {
+    try {
+      const res = await fetch(API.whoami, { credentials: "include" });
+      isAdmin = res.ok && (await res.json()).authorized === true;
+    } catch {
+      isAdmin = false;
+    }
+  }
+
+  // --- the sphere -----------------------------------------------------------
+
+  function loadSphere(photo: Photo) {
+    document.dispatchEvent(
+      new CustomEvent("pano:load", {
+        detail: { target: "#stage", src: `${API.img}/preview/${photo.id}` },
+      }),
+    );
+    document.dispatchEvent(
+      new CustomEvent("pano:meta", {
+        detail: {
+          target: "#stage",
+          lat: photo.lat,
+          lon: photo.lon,
+          /*
+            Order is the cycle order, and the first entry has to be the texture
+            the viewer booted from. `short` is what the quality button reads — it
+            sits in a pill, so it stays short — a few characters — and the full
+            label goes to the aria-label.
+          */
+          resolutions: [
+            { id: "4k", short: "4K", label: "4K preview", panorama: `${API.img}/preview/${photo.id}` },
+            /*
+              The 8K rung only exists for captures big enough to warrant it, and
+              only for uploads made after it was added — older panoramas cycle
+              straight from the preview to the original.
+            */
+            ...(photo.large
+              ? [
+                  {
+                    id: "8k",
+                    short: "8K",
+                    label: `8K${photo.largeBytes ? ` · ${formatBytes(photo.largeBytes)}` : ""}`,
+                    panorama: photo.large,
+                  },
+                ]
+              : []),
+            {
+              id: "original",
+              short: "Orig",
+              label: `Original${photo.bytes ? ` · ${formatBytes(photo.bytes)}` : ""}`,
+              panorama: photo.original,
+            },
+          ],
+        },
+      }),
+    );
+  }
+
+  // --- the caption block ----------------------------------------------------
+
+  function renderChrome(photo: Photo) {
+    const title = displayTitle(photo);
+    // The worker already set this for scrapers; a client-side visit needs it too.
+    document.title = `${title} | ${SITE_NAME}`;
+    if (titleEl) titleEl.textContent = title;
+
+    if (metaEl) {
+      metaEl.textContent = [formatDate(photo), formatCoords(photo), photo.camera, formatBytes(photo.bytes)]
+        .filter(Boolean)
+        .join(" · ");
+      const map = mapUrl(photo);
+      if (map) {
+        const link = document.createElement("a");
+        link.href = map;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = "Map ↗";
+        link.className = "pointer-events-auto ml-2 underline underline-offset-4 hover:text-white";
+        metaEl.append(link);
+      }
+    }
+
+    if (descEl) {
+      descEl.textContent = photo.description ?? "";
+      descEl.hidden = !photo.description;
+    }
+
+    const index = photos.findIndex((p) => p.id === photo.id);
+    // Only one panorama in the archive means nothing to step between.
+    for (const [button, target] of [
+      [prevEl, index - 1],
+      [nextEl, index + 1],
+    ] as const) {
+      if (!button) continue;
+      button.hidden = photos.length < 2;
+      button.disabled = target < 0 || target >= photos.length;
+    }
+  }
+
+  // --- moving between panoramas --------------------------------------------
+
+  function show(photo: Photo, { push = false } = {}) {
+    current = photo;
+    if (push) {
+      // A fresh photo deserves a fresh viewpoint, so the old hash goes with it.
+      history.pushState(null, "", `/p/${encodeURIComponent(photo.id)}/`);
+    }
+    loadSphere(photo);
+    renderChrome(photo);
+    void loadPeaks(photo);
+  }
+
+  function step(delta: number) {
+    if (!current) return;
+    const next = photos[photos.findIndex((p) => p.id === current!.id) + delta];
+    if (next) show(next, { push: true });
+  }
+
+  prevEl?.addEventListener("click", () => step(-1));
+  nextEl?.addEventListener("click", () => step(1));
+
+  window.addEventListener("popstate", () => {
+    const photo = photos.find((p) => p.id === idFromLocation());
+    if (photo && photo.id !== current?.id) show(photo);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+
+    // Arrows and +/− are the sphere's; these are the page's.
+    if (event.key === "[" || event.key === "p") step(-1);
+    else if (event.key === "]" || event.key === "n") step(1);
+    else if (event.key === "l") togglePanel();
+  });
+
+  // --- peaks ----------------------------------------------------------------
+
+  function togglePanel(force?: boolean) {
+    if (!panelEl || !peaksToggle || peaksToggle.hidden) return;
+    const open = force ?? !panelEl.hasAttribute("data-open");
+    panelEl.hidden = false;
+    panelEl.toggleAttribute("data-open", open);
+    peaksToggle.setAttribute("aria-pressed", String(open));
+  }
+
+  peaksToggle?.addEventListener("click", () => togglePanel());
+  document.querySelector("[data-peaks-close]")?.addEventListener("click", () => togglePanel(false));
+
+  function setStatus(message: string) {
+    if (peaksStatusEl) peaksStatusEl.textContent = message;
+  }
+
+  function renderPeakList() {
+    if (!peaksListEl) return;
+    peaksListEl.replaceChildren();
+
+    for (const peak of placed) {
+      const row = document.createElement("li");
+      const detail = `${Math.round(peak.ele)} m · ${formatDistance(peak.distance)} · ${peak.compass}`;
+
+      // Without a heading there is nowhere on the sphere to send the reader, so
+      // the row stays a plain line of text rather than a button that lies.
+      const inner = document.createElement(heading == null ? "span" : "button");
+      inner.className = "peak-row";
+      if (inner instanceof HTMLButtonElement) {
+        inner.type = "button";
+        inner.addEventListener("click", () => {
+          document.dispatchEvent(
+            new CustomEvent("pano:look", { detail: { target: "#stage", ...spherePosition(peak, heading!) } }),
+          );
+        });
+      }
+
+      const name = document.createElement("span");
+      name.className = "peak-row__name";
+      name.textContent = peak.name;
+
+      const meta = document.createElement("span");
+      meta.className = "peak-row__meta";
+      meta.textContent = detail;
+
+      inner.append(name, meta);
+      row.append(inner);
+      peaksListEl.append(row);
+    }
+  }
+
+  /** Push the labels onto the sphere — or clear them, if north is unknown. */
+  function applyMarkers() {
+    document.dispatchEvent(
+      new CustomEvent("pano:peaks", {
+        detail: {
+          target: "#stage",
+          peaks:
+            heading == null
+              ? []
+              : placed.map((peak) => ({
+                  id: `peak-${peak.name}-${Math.round(peak.bearing)}`,
+                  name: peak.name,
+                  detail: `${Math.round(peak.ele)} m · ${formatDistance(peak.distance)}`,
+                  tier: peak.tier,
+                  rank: peak.rank,
+                  ...spherePosition(peak, heading),
+                })),
+        },
+      }),
+    );
+  }
+
+  function setHeading(value: number | null) {
+    heading = value;
+    applyMarkers();
+    renderPeakList();
+    if (headingOut) headingOut.textContent = value == null ? "unknown" : `${Math.round(value)}°`;
+  }
+
+  async function loadPeaks(photo: Photo) {
+    placed = [];
+    setHeading(photo.heading);
+    renderPeakList();
+
+    if (photo.lat == null || photo.lon == null) {
+      if (peaksToggle) peaksToggle.hidden = true;
+      togglePanel(false);
+      return;
+    }
+
+    if (peaksToggle) peaksToggle.hidden = false;
+    if (calibrateEl) calibrateEl.hidden = !isAdmin;
+    if (headingInput) headingInput.value = String(Math.round(photo.heading ?? 0));
+    setStatus("Looking up summits…");
+
+    let payload: PeaksPayload;
+    try {
+      payload = await fetchPeaks(photo.id);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not load nearby peaks");
+      return;
+    }
+
+    // Another panorama was opened while Overpass was thinking.
+    if (current?.id !== photo.id) return;
+
+    placed = placePeaks(payload, { altitude: photo.altitude, altitudeAmsl: photo.altitudeAmsl });
+    if (!placed.length) {
+      setStatus("No named summits stand above this horizon.");
+    } else if (photo.heading == null) {
+      setStatus(
+        isAdmin
+          ? `${placed.length} summits · no recorded north — align the labels below`
+          : `${placed.length} summits, by compass bearing · this panorama has no recorded north, so they can't be placed on the sphere`,
+      );
+    } else {
+      setStatus(`${placed.length} summits within ${Math.round(payload.radius / 1000)} km`);
+    }
+
+    setHeading(photo.heading);
+  }
+
+  // Dragging previews the alignment live: the labels swing across the sphere and
+  // you stop when they sit on the summits. Far quicker than typing a number.
+  headingInput?.addEventListener("input", () => setHeading(Number(headingInput.value)));
+
+  calibrateEl?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!current || heading == null) return;
+    if (saveStatusEl) saveStatusEl.textContent = "Saving…";
+    try {
+      const res = await fetch(`${API.photos}/${encodeURIComponent(current.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ heading }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `Failed (${res.status})`);
+      current.heading = heading;
+      if (saveStatusEl) saveStatusEl.textContent = "Saved";
+      setStatus(`${placed.length} summits · north saved`);
+    } catch (error) {
+      if (saveStatusEl) saveStatusEl.textContent = error instanceof Error ? error.message : "Failed";
+    }
+  });
+
+  // --- boot -----------------------------------------------------------------
+
+  const id = idFromLocation();
+
+  if (!ID_RE.test(id)) {
     showError("No panorama selected.");
   } else {
+    if (!window.location.pathname.startsWith("/p/")) {
+      history.replaceState(null, "", `/p/${encodeURIComponent(id)}/${window.location.hash}`);
+    }
+
     // Start the sphere immediately — the metadata request can lag behind.
     document.dispatchEvent(
       new CustomEvent("pano:load", { detail: { target: "#stage", src: `${API.img}/preview/${id}` } }),
@@ -87,60 +555,14 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
     void (async () => {
       try {
-        const photo = (await fetchPhotos()).find((p) => p.id === id);
+        const [list] = await Promise.all([fetchPhotos(), checkAdmin()]);
+        photos = list;
+        const photo = photos.find((p) => p.id === id);
         if (!photo) {
           showError("That panorama is not in the archive.");
           return;
         }
-
-        const title = displayTitle(photo);
-        document.title = `${title} | dji.dz0ny.dev`;
-        if (titleEl) titleEl.textContent = title;
-
-        const coords = formatCoords(photo);
-        const parts = [formatDate(photo), coords, photo.camera, formatBytes(photo.bytes)].filter(Boolean);
-        if (metaEl) {
-          metaEl.textContent = parts.join(" · ");
-          const map = mapUrl(photo);
-          if (map) {
-            const link = document.createElement("a");
-            link.href = map;
-            link.target = "_blank";
-            link.rel = "noreferrer";
-            link.textContent = "Map ↗";
-            link.className = "pointer-events-auto ml-2 underline underline-offset-4 hover:text-white";
-            metaEl.append(link);
-          }
-        }
-
-        /*
-          Hand the plugins what only the archive knows: coordinates for the
-          minimap, and the two textures we actually store. The preview entry has
-          to be the exact URL the viewer booted from, or the resolution plugin
-          treats it as a change and reloads the same image.
-        */
-        document.dispatchEvent(
-          new CustomEvent("pano:meta", {
-            detail: {
-              target: "#stage",
-              lat: photo.lat,
-              lon: photo.lon,
-              resolutions: [
-                { id: "4k", label: "4K preview", panorama: `${API.img}/preview/${id}` },
-                {
-                  id: "max",
-                  label: `Full size${photo.bytes ? ` · ${formatBytes(photo.bytes)}` : ""}`,
-                  panorama: photo.original,
-                },
-              ],
-            },
-          }),
-        );
-
-        if (photo.description && descEl) {
-          descEl.textContent = photo.description;
-          descEl.hidden = false;
-        }
+        show(photo);
       } catch {
         // The sphere is already up; a failed metadata fetch is not fatal.
         if (titleEl) titleEl.textContent = "Panorama";

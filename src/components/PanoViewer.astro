@@ -28,8 +28,21 @@ interface Props {
 	 * tiles at runtime, which is a network round trip the hero does not want.
 	 */
 	map?: boolean;
-	/** Load the settings + resolution plugins, so the viewer can swap textures. */
+	/** Show the quality button, which cycles through the textures `pano:meta` names. */
 	resolutions?: boolean;
+	/**
+	 * Open on a stereographic "little planet" and unroll into the sphere. A one-
+	 * off flourish for the dedicated viewer; silently skipped for reduced-motion
+	 * readers and whenever the URL already names a viewpoint.
+	 */
+	intro?: boolean;
+	/**
+	 * Keep the current view in the URL hash, so a copied link reopens looking at
+	 * the same thing. Only for pages where the sphere IS the page.
+	 */
+	hash?: boolean;
+	/** Load the markers plugin, which the peak labels need. */
+	markers?: boolean;
 	class?: string;
 	id?: string;
 }
@@ -42,6 +55,9 @@ const {
 	controls = true,
 	map = false,
 	resolutions = false,
+	intro = false,
+	hash = false,
+	markers = false,
 	class: className = "",
 	id,
 } = Astro.props;
@@ -58,6 +74,9 @@ const {
   data-controls={String(controls)}
   data-map={String(map)}
   data-resolutions={String(resolutions)}
+  data-intro={String(intro)}
+  data-hash={String(hash)}
+  data-markers={String(markers)}
 >
   {/* Poster / fallback: whatever the caller slots in, usually a flat <Picture>. */}
   <div class="pano-poster absolute inset-0 transition-opacity duration-700" data-pano-poster>
@@ -179,12 +198,115 @@ const {
     color: hsl(var(--brand-primary));
   }
 
-  /* The settings button carries the accent-coloured badge already, so tinting
-     its glyph the same accent leaves it barely legible — and the hover wash
-     underneath it is the same hue again. Invert the disc instead. */
-  .pano .psv-settings-button.psv-button--active {
+  /*
+    Quality is a cycler, not a menu: one button that reads out the texture it
+    will switch to next. It is the only button in the pill with text in it, so
+    it sizes to its label instead of the 40px disc the glyph buttons use.
+  */
+  .pano .psv-button.pano-quality {
+    width: auto;
+    min-width: 40px;
+    padding-inline: 0.75rem;
+    font-family: var(--type-meta);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Mid-swap the label is stale, so it says so rather than lying about the
+     texture on screen. */
+  .pano .psv-button.pano-quality[data-busy] {
+    color: rgb(255 255 255 / 0.5);
+    pointer-events: none;
+  }
+
+  /*
+    Peak labels. A hairline dropped onto the summit with the name stacked above
+    it — the convention every panorama board on a mountain top uses, and it
+    survives a crowded skyline far better than pins or boxes would.
+  */
+  /*
+    Bound to `--visible` deliberately. Photo Sphere Viewer hides a marker that
+    has left the field of view with `.psv-marker { display: none }`, and a plain
+    `.pano .peak-pin` rule outranks it — which left every marker behind the
+    camera parked at wherever it was last drawn, piling into a heap against the
+    edge of the screen. Matching the plugin's own class hands that decision back.
+  */
+  .pano .peak-pin.psv-marker--visible {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Labels are annotation, not furniture: never eat a drag meant for the sphere. */
+    pointer-events: none;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /*
+    A hazy ridge line at 30 km is low-contrast grey-blue, and white text with a
+    drop shadow disappears into it. The plate is what makes the label readable
+    against any part of the sky or the ground it happens to land on.
+  */
+  .pano .peak-pin__plate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.0625rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgb(255 255 255 / 0.14);
+    border-radius: 0.375rem;
+    background: color-mix(in srgb, black 62%, transparent);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.45);
+    transition: opacity 140ms ease;
+  }
+
+  /* Muted by the on-screen collision pass; the stem below it stays. */
+  .pano .peak-pin__plate--crowded {
+    opacity: 0;
+  }
+
+  .pano .peak-pin__name {
+    font-family: var(--type-meta);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+
+  .pano .peak-pin__meta {
+    font-family: var(--type-meta);
+    font-size: 0.5625rem;
+    letter-spacing: 0.08em;
+    color: rgb(255 255 255 / 0.72);
+  }
+
+  .pano .peak-pin__stem {
+    position: relative;
+    width: 1px;
+    /*
+      Labels near each other along the horizon are handed different tiers, and
+      the stem is where that becomes visible: each row hangs its plate a little
+      higher, so a crowded ridge reads as a stack rather than a pile.
+    */
+    height: calc(1.25rem + var(--peak-tier, 0) * 2.2rem);
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.25), rgb(255 255 255 / 0.85));
+  }
+
+  /* The dot marks the summit itself; the marker is anchored so this lands on it. */
+  .pano .peak-pin__stem::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
     background: hsl(var(--brand-primary));
-    color: #04121a;
+    box-shadow: 0 0 6px hsl(var(--brand-primary) / 0.8);
   }
 
   .pano .psv-caption {
@@ -276,36 +398,6 @@ const {
     color: rgb(255 255 255 / 0.92);
   }
 
-  /* The settings panel is the one piece of PSV chrome with real text in it. */
-  .pano .psv-settings {
-    border: 1px solid rgb(255 255 255 / 0.16);
-    border-radius: 0.75rem;
-    background: color-mix(in srgb, black 78%, transparent);
-    backdrop-filter: blur(14px);
-    overflow: hidden;
-  }
-
-  .pano .psv-settings-item-label,
-  .pano .psv-settings-item-value {
-    font-family: var(--type-meta);
-    font-size: 0.6875rem;
-    letter-spacing: 0.08em;
-  }
-
-  /* The badge is absolutely positioned inside a 40px button, and the pill clips
-     what overflows — which is why the resolution ids are kept to a few
-     characters rather than spelled out. */
-  .pano .psv-settings-badge {
-    top: 2px;
-    right: 2px;
-    background: hsl(var(--brand-primary));
-    color: #04121a;
-    font-family: var(--type-meta);
-    font-size: 8px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
   /*
     Real fullscreen promotes PSV's own container, so page chrome drops out for
     free. The emulation has no such power — anything painted over the sphere is
@@ -325,14 +417,25 @@ const {
     together against 68 kB of plugin JS, so only the JS is worth splitting.
   */
   import "@photo-sphere-viewer/map-plugin/index.css";
-  import "@photo-sphere-viewer/settings-plugin/index.css";
+  import "@photo-sphere-viewer/markers-plugin/index.css";
 
   import type { Viewer } from "@photo-sphere-viewer/core";
   // Type-only, so these erase at build time and pull in no chunk.
   import type { MapPlugin as MapPluginType } from "@photo-sphere-viewer/map-plugin";
-  import type { ResolutionPlugin as ResolutionPluginType } from "@photo-sphere-viewer/resolution-plugin";
+  import type { MarkersPlugin as MarkersPluginType } from "@photo-sphere-viewer/markers-plugin";
 
-  type PanoElement = HTMLElement & { _panoViewer?: Viewer; _panoBoot?: Promise<Viewer | null> };
+  /** One texture the sphere can show. `short` is what the quality button reads. */
+  type Resolution = { id: string; label: string; short?: string; panorama: string };
+
+  type PanoElement = HTMLElement & {
+    _panoViewer?: Viewer;
+    _panoBoot?: Promise<Viewer | null>;
+    /** Set by `pano:meta`; empty until the archive says which sizes exist. */
+    _panoResolutions?: Resolution[];
+    _panoResolutionIndex?: number;
+    /** Set once the peak labels are on; re-runs the collision pass on demand. */
+    _panoDeclutter?: () => void;
+  };
 
   /** Cached across every viewer on the page — three.js should load exactly once. */
   let libraryPromise: Promise<{
@@ -374,22 +477,64 @@ const {
     return mapPromise;
   }
 
-  let resolutionPromise: Promise<{
-    SettingsPlugin: typeof import("@photo-sphere-viewer/settings-plugin").SettingsPlugin;
-    ResolutionPlugin: typeof import("@photo-sphere-viewer/resolution-plugin").ResolutionPlugin;
-  }> | null = null;
+  let markersPromise: Promise<typeof import("@photo-sphere-viewer/markers-plugin").MarkersPlugin> | null = null;
 
-  function loadResolutionPlugin() {
-    // ResolutionPlugin throws at init without SettingsPlugin — it is the host
-    // for the quality picker, not an optional companion.
-    resolutionPromise ??= (async () => {
-      const [settings, resolution] = await Promise.all([
-        import("@photo-sphere-viewer/settings-plugin"),
-        import("@photo-sphere-viewer/resolution-plugin"),
-      ]);
-      return { SettingsPlugin: settings.SettingsPlugin, ResolutionPlugin: resolution.ResolutionPlugin };
+  function loadMarkersPlugin() {
+    markersPromise ??= (async () => {
+      const plugin = await import("@photo-sphere-viewer/markers-plugin");
+      return plugin.MarkersPlugin;
     })();
-    return resolutionPromise;
+    return markersPromise;
+  }
+
+  /**
+   * Quality switching used to be the settings + resolution plugins: a gear
+   * button, a panel, a "Quality" row, a submenu — four taps and two extra
+   * bundles to move between two textures. With only ever a handful of sizes it
+   * is a cycler instead. One button, labelled with the size it will switch to,
+   * driven by `viewer.setPanorama` (which keeps the current view position).
+   */
+  const QUALITY_BUTTON_ID = "quality";
+
+  function shortLabel(resolution: Resolution): string {
+    return (resolution.short || resolution.id).toUpperCase();
+  }
+
+  /** The button advertises its *destination*, so a tap does what the label says. */
+  function paintQualityButton(el: PanoElement, viewer: Viewer) {
+    const button = viewer.navbar.getButton(QUALITY_BUTTON_ID, false)?.container;
+    if (!button) return;
+
+    const list = el._panoResolutions ?? [];
+    if (list.length < 2) {
+      button.style.display = "none";
+      return;
+    }
+
+    const next = list[((el._panoResolutionIndex ?? 0) + 1) % list.length];
+    button.style.display = "";
+    button.textContent = shortLabel(next);
+    button.setAttribute("aria-label", `Switch to ${next.label}`);
+  }
+
+  async function cycleQuality(el: PanoElement, viewer: Viewer) {
+    const list = el._panoResolutions ?? [];
+    if (list.length < 2) return;
+
+    const button = viewer.navbar.getButton(QUALITY_BUTTON_ID, false)?.container;
+    const index = ((el._panoResolutionIndex ?? 0) + 1) % list.length;
+    const next = list[index];
+
+    // A second tap mid-swap would queue a texture nobody asked for; the label is
+    // stale until the new one lands, so the button says so and stops listening.
+    button?.setAttribute("data-busy", "");
+    try {
+      await viewer.setPanorama(next.panorama, { transition: false, showLoader: true });
+      el._panoResolutionIndex = index;
+    } finally {
+      button?.removeAttribute("data-busy");
+      paintQualityButton(el, viewer);
+    }
   }
 
   /**
@@ -411,12 +556,158 @@ const {
    * mid-tap. Move the name to `aria-label` so screen readers keep it and the
    * tooltip goes away.
    */
+  /**
+   * Stop the navbar from folding itself into a "Menu" panel.
+   *
+   * Photo Sphere Viewer collapses buttons whenever the bar's own width is less
+   * than the buttons it holds — sensible for the stock full-width bar, wrong for
+   * ours, which is a shrink-to-fit pill and so is *always* exactly as wide as
+   * its contents. The result was a side panel listing the quality and gyroscope
+   * buttons that were sitting right there in the bar. The bar is five small
+   * round buttons; there is nothing here worth hiding behind a menu.
+   */
+  function disableNavbarCollapse(viewer: Viewer) {
+    type NavbarButton = { uncollapse?: () => void; hide?: (refresh: boolean) => void; autoSize?: () => void };
+    const navbar = (viewer as unknown as { navbar?: NavbarButton & { collapsed?: NavbarButton[]; getButton?: (id: string, warn?: boolean) => NavbarButton | null } }).navbar;
+    if (!navbar) return;
+
+    const keepOpen = () => {
+      for (const button of navbar.collapsed ?? []) button.uncollapse?.();
+      navbar.collapsed = [];
+      navbar.getButton?.("menu", false)?.hide?.(false);
+      // The caption still has to re-measure itself on resize; that part of
+      // `autoSize` was doing useful work.
+      navbar.getButton?.("caption", false)?.autoSize?.();
+    };
+
+    navbar.autoSize = keepOpen;
+    keepOpen();
+  }
+
+  /**
+   * Hide the labels that land on top of each other.
+   *
+   * The page already spreads the peaks around the horizon and stacks close
+   * neighbours into rows, but whether two plates actually overlap depends on the
+   * zoom — the same ridge is comfortable at 40° of field and a solid wall of text
+   * at 100°. So the last word is taken here, on screen, every time the view
+   * moves: walk the labels most striking summit first, and mute any whose plate
+   * would land on one already kept. The stem and its dot stay, so a muted label
+   * still reads as "a named summit, there" rather than vanishing outright.
+   */
+  function watchForCollisions(viewer: Viewer, el: PanoElement) {
+    /** Breathing room between two plates, in pixels. */
+    const GAP = 6;
+
+    let queued = false;
+
+    const resolve = () => {
+      queued = false;
+      const entries = Array.from(el.querySelectorAll<HTMLElement>(".peak-pin__plate"))
+        .map((plate) => ({ plate, rank: Number(plate.dataset.rank ?? 0), rect: plate.getBoundingClientRect() }))
+        // A marker outside the field of view is not laid out at all.
+        .filter((entry) => entry.rect.width > 0)
+        .sort((a, b) => a.rank - b.rank);
+
+      const kept: DOMRect[] = [];
+      for (const entry of entries) {
+        const clashes = kept.some(
+          (rect) =>
+            entry.rect.left < rect.right + GAP &&
+            entry.rect.right + GAP > rect.left &&
+            entry.rect.top < rect.bottom + GAP &&
+            entry.rect.bottom + GAP > rect.top,
+        );
+        entry.plate.classList.toggle("peak-pin__plate--crowded", clashes);
+        if (!clashes) kept.push(entry.rect);
+      }
+    };
+
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(resolve);
+    };
+
+    el._panoDeclutter = schedule;
+    // `render` fires once per frame while the view moves; the flag collapses a
+    // burst of them into a single pass, and a still sphere costs nothing.
+    if (!el.dataset.declutter) {
+      viewer.addEventListener("render", schedule);
+      el.dataset.declutter = "true";
+    }
+    schedule();
+  }
+
   function labelButtons(root: HTMLElement) {
     for (const button of root.querySelectorAll<HTMLElement>(".psv-button[title]")) {
       const label = button.title;
       if (label) button.setAttribute("aria-label", label);
       button.removeAttribute("title");
     }
+  }
+
+  const DEG = Math.PI / 180;
+
+  /**
+   * A viewpoint carried in the URL hash: `#v=<yaw>,<pitch>,<zoom>`, degrees and
+   * percent. Copying the address bar while looking at something therefore hands
+   * the next reader that same view rather than the panorama's default heading —
+   * which is the whole difference between "look at this photo" and "look at
+   * THIS, in the photo".
+   */
+  function readHashView(): { yaw: number; pitch: number; zoom: number } | null {
+    const raw = /[#&]v=([^&]+)/.exec(window.location.hash)?.[1];
+    if (!raw) return null;
+    const [yaw, pitch, zoom] = raw.split(",").map(Number);
+    if (![yaw, pitch, zoom].every(Number.isFinite)) return null;
+    return { yaw: yaw * DEG, pitch: pitch * DEG, zoom: Math.min(100, Math.max(0, zoom)) };
+  }
+
+  function trackHash(viewer: Viewer) {
+    let timer = 0;
+    const write = () => {
+      const { yaw, pitch } = viewer.getPosition();
+      const view = `v=${(yaw / DEG).toFixed(1)},${(pitch / DEG).toFixed(1)},${Math.round(viewer.getZoomLevel())}`;
+      // replaceState, not a hash assignment: the latter stacks a history entry
+      // per drag, and the back button would then walk the reader through every
+      // glance they took instead of leaving the page.
+      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${view}`);
+    };
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(write, 500);
+    };
+    viewer.addEventListener("position-updated", schedule);
+    viewer.addEventListener("zoom-updated", schedule);
+  }
+
+  /**
+   * The little-planet opening.
+   *
+   * Equirectangular photos have no natural "first frame", so the viewer starts
+   * looking straight down through a heavy fisheye — the whole scene curled into
+   * a globe — and unrolls to eye level. It doubles as an honest signal that this
+   * is a sphere and not a wide photograph, which no tooltip ever conveys as well.
+   */
+  function playIntro(viewer: Viewer, target: { yaw: number; pitch: number; zoom: number }) {
+    const start = performance.now();
+    // PSV animates at an angular speed rather than for a duration; 6rpm covers
+    // the 90° climb out of the planet in roughly this long, which is what the
+    // fisheye tween below has to match.
+    const duration = 2500;
+
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      // Ease out: most of the distortion is gone early, so the tail of the
+      // animation is a slow settle rather than a lurch.
+      viewer.setOption("fisheye", 2 * (1 - t) ** 2);
+      if (t < 1) requestAnimationFrame(step);
+      else viewer.setOption("fisheye", false);
+    };
+    requestAnimationFrame(step);
+
+    void viewer.animate({ ...target, speed: "6rpm" });
   }
 
   async function build(el: PanoElement) {
@@ -430,17 +721,22 @@ const {
 
     const { Viewer, GyroscopePlugin, AutorotatePlugin } = await loadLibrary();
 
-    const [MapPlugin, resolutionLib] = await Promise.all([
-      el.dataset.map === "true" ? loadMapPlugin() : null,
-      el.dataset.resolutions === "true" ? loadResolutionPlugin() : null,
-    ]);
+    const MapPlugin = el.dataset.map === "true" ? await loadMapPlugin() : null;
+    const MarkersPlugin = el.dataset.markers === "true" ? await loadMarkersPlugin() : null;
+    const quality = el.dataset.resolutions === "true";
 
     /** Sitting inside a scrolling page: the page's gestures win over the sphere's. */
     const embedded = el.dataset.twoFingers === "true";
 
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
     // Idle rotation is opt-in, and never runs for reduced-motion users.
-    const autorotate =
-      el.dataset.autorotate === "true" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const autorotate = el.dataset.autorotate === "true" && !reducedMotion;
+
+    // A viewpoint in the URL is a deliberate instruction from whoever shared the
+    // link, so it outranks both the default framing and the opening animation.
+    const hashView = el.dataset.hash === "true" ? readHashView() : null;
+    const intro = el.dataset.intro === "true" && !reducedMotion && !hashView;
 
     const viewer = new Viewer({
       container: stage,
@@ -454,6 +750,7 @@ const {
         ],
         // The minimap is stitched from OSM tiles once coordinates arrive over
         // `pano:meta`; until then it is hidden below, after construction.
+        ...(MarkersPlugin ? [MarkersPlugin] : []),
         ...(MapPlugin
           ? [
               MapPlugin.withConfig({
@@ -470,14 +767,6 @@ const {
               }),
             ]
           : []),
-        ...(resolutionLib
-          ? [
-              resolutionLib.SettingsPlugin,
-              // `resolutions` stays null until `pano:meta` names the sizes —
-              // an empty array here would crash the plugin looking for a default.
-              resolutionLib.ResolutionPlugin.withConfig({ resolutions: null!, showBadge: true }),
-            ]
-          : []),
       ],
       // Dragging already moves and pinching already zooms, so the arrow pad and
       // the zoom slider are dead weight on a phone. Caption only when there is one.
@@ -489,18 +778,37 @@ const {
             "zoomOut",
             "zoomIn",
             ...(el.dataset.caption ? ["caption"] : []),
-            ...(resolutionLib ? ["settings"] : []),
+            // Starts hidden and unlabelled: the sizes are only known once
+            // `pano:meta` arrives, and a lone size is nothing to switch between.
+            ...(quality
+              ? [
+                  {
+                    id: QUALITY_BUTTON_ID,
+                    content: "",
+                    className: "pano-quality",
+                    onClick: (v: Viewer) => void cycleQuality(el, v),
+                  },
+                ]
+              : []),
             "gyroscope",
             "fullscreen",
           ],
       touchmoveTwoFingers: embedded,
+      // Arrow keys and +/− only where the sphere owns the page; embedded in a
+      // scrolling article the same keys belong to the document.
+      keyboard: embedded ? false : "always",
       // Embedded in a scrolling page the wheel is off entirely, so a scroll just
       // scrolls — `mousewheelCtrlKey` would instead nag with a "use ctrl+scroll"
       // overlay every time. On the full-screen viewer nothing is behind the
       // sphere, so the wheel zooms directly.
       mousewheel: !embedded,
       mousewheelCtrlKey: false,
-      defaultZoomLvl: 35,
+      defaultYaw: hashView?.yaw ?? 0,
+      // The intro starts looking straight down through a fisheye and unrolls on
+      // `ready`; everything else opens where it was asked to.
+      defaultPitch: intro ? -Math.PI / 2 : (hashView?.pitch ?? 0),
+      defaultZoomLvl: intro ? 0 : (hashView?.zoom ?? 35),
+      fisheye: intro ? 2 : false,
       minFov: 25,
       maxFov: 100,
       moveInertia: 0.85,
@@ -513,34 +821,21 @@ const {
     // The navbar exists as soon as the viewer is constructed; do not wait for
     // `ready`, which never fires if the panorama itself fails to load.
     labelButtons(stage);
+    disableNavbarCollapse(viewer);
 
     // An empty minimap is worse than none, and `visibleOnLoad: false` is the
     // wrong lever — it *collapses* the map, and a collapsed map skips the render
     // loop, so the tiles never paint once the image finally lands.
     viewer.getPlugin<MapPluginType>("map")?.hide();
 
-    /*
-      Picking an option calls the settings *component*'s `hide()` directly rather
-      than the plugin's `hideSettings()`, so the button never learns the menu
-      closed and keeps its active tint for the rest of the session. Clear the
-      flag once the panel is actually gone — the parent "Quality" row opens a
-      submenu and must be left alone. Only the flag: `hideSettings()` would also
-      pull focus back to the button and leave a ring after a plain mouse click.
-    */
-    const panel = stage.querySelector<HTMLElement>(".psv-settings");
-    if (panel) {
-      panel.addEventListener("click", () => {
-        requestAnimationFrame(() => {
-          if (!panel.classList.contains("psv-settings--open")) {
-            viewer.navbar.getButton("settings", false)?.toggleActive(false);
-          }
-        });
-      });
-    }
+    // Nothing to cycle through yet — `pano:meta` fills the list and shows it.
+    if (quality) paintQualityButton(el, viewer);
 
     viewer.addEventListener("ready", () => {
       stage.style.opacity = "1";
       labelButtons(stage);
+      if (intro) playIntro(viewer, { yaw: 0, pitch: 0, zoom: 35 });
+      if (el.dataset.hash === "true") trackHash(viewer);
       // Hold the poster one beat longer so there is no black flash between them.
       window.setTimeout(() => poster?.classList.add("opacity-0"), 250);
 
@@ -585,7 +880,7 @@ const {
       target: string;
       lat?: number | null;
       lon?: number | null;
-      resolutions?: Array<{ id: string; label: string; panorama: string }>;
+      resolutions?: Resolution[];
     };
     const el = document.querySelector<PanoElement>(target);
     if (!el) return;
@@ -597,10 +892,11 @@ const {
     if (!viewer) return;
 
     if (resolutions?.length) {
-      const plugin = viewer.getPlugin<ResolutionPluginType>("resolution");
-      // Leave the default alone: the first entry is the texture already loaded,
-      // and naming it would reload the same image.
-      plugin?.setResolutions(resolutions);
+      // The first entry is the texture the viewer booted from — start the cycle
+      // there so the button offers the next size up rather than a reload.
+      el._panoResolutions = resolutions;
+      el._panoResolutionIndex = 0;
+      paintQualityButton(el, viewer);
     }
 
     if (lat != null && lon != null) {
@@ -618,6 +914,60 @@ const {
     }
   });
 
+  /** Swing the view to a point on the sphere — used by the peak list. */
+  document.addEventListener("pano:look", async (event: Event) => {
+    const { target, yaw, pitch } = (event as CustomEvent).detail as { target: string; yaw: number; pitch: number };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    const viewer = await (el._panoBoot ?? Promise.resolve(el._panoViewer ?? null));
+    if (!viewer) return;
+
+    // Reduced motion still moves the view — it just arrives instead of sweeping.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) viewer.rotate({ yaw, pitch });
+    else void viewer.animate({ yaw, pitch, speed: "8rpm" });
+  });
+
+  const escapeHtml = (value: string) =>
+    value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+  /**
+   * Peak labels, computed by the page and handed over as sphere coordinates —
+   * the viewer knows nothing about mountains, only about yaw and pitch. An empty
+   * list clears them, which is what happens when the panorama has no heading and
+   * the labels would otherwise point at the wrong summits.
+   */
+  document.addEventListener("pano:peaks", async (event: Event) => {
+    const { target, peaks } = (event as CustomEvent).detail as {
+      target: string;
+      peaks: Array<{ id: string; name: string; detail: string; tier?: number; rank?: number; yaw: number; pitch: number }>;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    const viewer = await (el._panoBoot ?? Promise.resolve(el._panoViewer ?? null));
+    const plugin = viewer?.getPlugin<MarkersPluginType>("markers");
+    if (!plugin) return;
+
+    watchForCollisions(viewer!, el);
+
+    plugin.setMarkers(
+      peaks.map((peak) => ({
+        id: peak.id,
+        position: { yaw: peak.yaw, pitch: peak.pitch },
+        // The tier lengthens the stem, which lifts the plate clear of whatever
+        // else the page decided sits close to it along the horizon.
+        html: `<span class="peak-pin__plate" data-rank="${Math.max(0, Math.round(peak.rank ?? 0))}"><span class="peak-pin__name">${escapeHtml(peak.name)}</span><span class="peak-pin__meta">${escapeHtml(peak.detail)}</span></span><span class="peak-pin__stem" style="--peak-tier:${Math.max(0, Math.round(peak.tier ?? 0))}"></span>`,
+        className: "peak-pin",
+        // The dot at the foot of the stem is what sits on the summit.
+        anchor: "bottom center",
+        // A little give with the field of view, but never so small that the
+        // name stops being readable — which is the only reason it is there.
+        scale: { zoom: [0.9, 1.1] },
+      })),
+    );
+  });
+
   // Let other scripts (the gallery's lightbox) drive a viewer directly.
   document.addEventListener("pano:load", (event: Event) => {
     const { target, src, caption } = (event as CustomEvent).detail as {
@@ -630,6 +980,10 @@ const {
     el.dataset.src = src;
     if (caption !== undefined) el.dataset.caption = caption;
     if (el._panoViewer) {
+      // A different photo: last one's textures and summits belong to it, not this.
+      el._panoResolutions = [];
+      el._panoResolutionIndex = 0;
+      el._panoViewer.getPlugin<MarkersPluginType>("markers")?.clearMarkers();
       void el._panoViewer.setPanorama(src, { caption, transition: { effect: "fade" } });
     } else {
       void boot(el);

@@ -3,8 +3,9 @@
  *
  * Bucket layout
  *   thumbs/<id>     small webp card image — ALSO the metadata record for <id>
- *   previews/<id>   ~4096px webp the sphere viewer actually loads
- *   photos/<id>     the untouched original straight off the drone
+ *   previews/<id>   ~4096px webp the sphere viewer boots with
+ *   larges/<id>     8192px webp — the middle rung of the quality ladder
+ *   photos/<id>     the full-resolution archive copy
  *
  * All metadata lives in the thumb's `customMetadata`. Thumbs are tens of
  * kilobytes, so editing a title is a cheap re-put; doing the same on a 40 MB
@@ -13,12 +14,15 @@
  */
 
 import { verifyAccess } from './access.js';
+import { handlePeaks } from './peaks.js';
 
 const KINDS = {
 	thumb: { prefix: 'thumbs/', maxBytes: 2 * 1024 * 1024 },
 	/** 1200×630 horizon crop, used only as the link-preview card. */
 	cover: { prefix: 'covers/', maxBytes: 4 * 1024 * 1024 },
 	preview: { prefix: 'previews/', maxBytes: 40 * 1024 * 1024 },
+	/** 8192px webp. Absent on small captures and on pre-2026 uploads. */
+	large: { prefix: 'larges/', maxBytes: 80 * 1024 * 1024 },
 	original: { prefix: 'photos/', maxBytes: 200 * 1024 * 1024 },
 };
 
@@ -55,6 +59,9 @@ function toPhoto(object) {
 		lat: m.lat ? Number(m.lat) : null,
 		lon: m.lon ? Number(m.lon) : null,
 		altitude: m.altitude ? Number(m.altitude) : null,
+		altitudeAmsl: m.altitudeAmsl ? Number(m.altitudeAmsl) : null,
+		/** `''` clears it, so an empty string must not read as 0° (due north). */
+		heading: m.heading === undefined || m.heading === '' ? null : Number(m.heading),
 		width: m.width ? Number(m.width) : null,
 		height: m.height ? Number(m.height) : null,
 		bytes: m.bytes ? Number(m.bytes) : null,
@@ -65,6 +72,9 @@ function toPhoto(object) {
 		thumb: `/~/img/thumb/${id}`,
 		cover: `/~/img/cover/${id}`,
 		preview: `/~/img/preview/${id}`,
+		/** Null when the upload never made one — the viewer then offers 4K and full size only. */
+		large: m.hasLarge ? `/~/img/large/${id}` : null,
+		largeBytes: m.largeBytes ? Number(m.largeBytes) : null,
 		original: `/~/img/original/${id}`,
 	};
 }
@@ -177,6 +187,19 @@ async function handlePatch(request, env, id) {
 		if (field in patch) next[field] = patch[field] == null ? '' : String(patch[field]);
 	}
 
+	/*
+	  Heading is the one field the archive can be *taught*: older uploads were
+	  re-encoded before the parser knew to look for it, so the viewer offers an
+	  alignment control that lands here. Null clears it, which turns the peak
+	  labels back off rather than leaving them pointing somewhere wrong.
+	*/
+	if ('heading' in patch) {
+		const heading = Number(patch.heading);
+		if (patch.heading == null || patch.heading === '') next.heading = '';
+		else if (!Number.isFinite(heading)) return fail(400, 'heading must be a number of degrees');
+		else next.heading = String(((heading % 360) + 360) % 360);
+	}
+
 	await env.PHOTOS.put(KINDS.thumb.prefix + id, existing.body, {
 		httpMetadata: existing.httpMetadata,
 		customMetadata: toCustomMetadata(next),
@@ -202,6 +225,10 @@ export async function handleApi(request, env) {
 
 	if (resource === 'photos' && rest.length === 0 && (method === 'GET' || method === 'HEAD')) {
 		return json({ photos: await listAll(env.PHOTOS) });
+	}
+
+	if (resource === 'peaks' && rest.length === 1) {
+		return handlePeaks(request, env, rest[0]);
 	}
 
 	// Everything past this point mutates the archive.

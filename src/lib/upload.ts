@@ -1,7 +1,8 @@
 /**
  * Upload pipeline.
  *
- * Three PUTs per panorama, deliberately ordered preview → original → thumb.
+ * One PUT per derivative, deliberately ordered cover → preview → large →
+ * original → thumb.
  * The thumb carries the metadata and is what `list()` enumerates, so writing it
  * last gives commit-last semantics: a run that dies halfway leaves unreferenced
  * bytes in the bucket rather than a broken card in the gallery.
@@ -16,7 +17,7 @@ import { API } from "@/config";
 import { buildDerivatives } from "@/lib/derive";
 import { readPanoMetadata } from "@/lib/exif";
 
-export type UploadStage = "reading" | "resizing" | "preview" | "original" | "thumb" | "done";
+export type UploadStage = "reading" | "resizing" | "preview" | "large" | "original" | "thumb" | "done";
 
 export interface UploadProgress {
 	stage: UploadStage;
@@ -31,12 +32,13 @@ export interface UploadProgress {
 const STAGE_WEIGHT: Record<Exclude<UploadStage, "done">, number> = {
 	reading: 0.03,
 	resizing: 0.42,
-	preview: 0.1,
-	original: 0.4,
+	preview: 0.08,
+	large: 0.12,
+	original: 0.3,
 	thumb: 0.05,
 };
 
-const STAGE_ORDER: Array<Exclude<UploadStage, "done">> = ["reading", "resizing", "preview", "original", "thumb"];
+const STAGE_ORDER: Array<Exclude<UploadStage, "done">> = ["reading", "resizing", "preview", "large", "original", "thumb"];
 
 function overallRatio(stage: Exclude<UploadStage, "done">, within: number): number {
 	let done = 0;
@@ -126,7 +128,7 @@ export async function uploadPanorama(
 	report("reading", 1);
 
 	report("resizing", 0);
-	const { archive, preview, cover, thumb, sourceWidth, sourceHeight } = await buildDerivatives(file, (ratio) =>
+	const { archive, large, preview, cover, thumb, sourceWidth, sourceHeight } = await buildDerivatives(file, (ratio) =>
 		report("resizing", ratio),
 	);
 
@@ -152,6 +154,7 @@ export async function uploadPanorama(
 	// stage rather than making the bar rewind for a rounding error of a file.
 	await upload("cover", cover.blob, {}, (r) => report("preview", r * 0.1));
 	await upload("preview", preview.blob, {}, (r) => report("preview", 0.1 + r * 0.9));
+	if (large) await upload("large", large.blob, {}, (r) => report("large", r));
 	await upload("original", original, {}, (r) => report("original", r));
 
 	// Written last: this object IS the gallery record.
@@ -165,12 +168,22 @@ export async function uploadPanorama(
 				lat: meta.lat ?? "",
 				lon: meta.lon ?? "",
 				altitude: meta.altitude ?? "",
+				// Both altitudes are kept: `altitude` is what the caption shows
+				// (height over the take-off point), `altitudeAmsl` is the sea-level
+				// datum the peak labels measure angles from.
+				altitudeAmsl: meta.altitudeAmsl ?? "",
+				heading: meta.heading ?? "",
 				camera: meta.camera ?? "",
 				originalName: file.name,
 				// What the archive actually holds — this is the figure the caption
 				// shows and the byte count the "Original" button really costs.
 				bytes: original.size,
 				sourceBytes: file.size,
+				// Whether the 8192px middle rung exists at all: captures smaller than
+				// it skip it, and so does a browser that ran out of memory encoding
+				// it. The viewer reads this rather than probing for a 404.
+				hasLarge: large ? 1 : "",
+				largeBytes: large ? large.blob.size : "",
 				width,
 				height,
 			}),

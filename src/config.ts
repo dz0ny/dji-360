@@ -30,7 +30,9 @@ export const SOCIAL_IMAGE = "/og.jpg";
 export const API = {
 	photos: "/~/api/photos",
 	whoami: "/~/api/whoami",
-	/** `/~/api/upload/<id>/<thumb|preview|original>/` */
+	/** `/~/api/peaks/<id>` — named summits around one panorama, cached in R2. */
+	peaks: "/~/api/peaks",
+	/** `/~/api/upload/<id>/<thumb|cover|preview|large|original>/` */
 	upload: "/~/api/upload",
 	img: "/~/img",
 } as const;
@@ -52,6 +54,14 @@ export const DERIVATIVES = {
 	archive: { quality: 0.9, maxSide: 16383 },
 	/** Sphere texture. 4096×2048 = 8.4 MP, inside iOS Safari's canvas ceiling. */
 	preview: { width: 4096, quality: 0.82 },
+	/**
+	 * The middle rung of the quality ladder. 4096 is what a phone can boot with;
+	 * the archive copy is the whole 12000px capture and tens of megabytes. 8192
+	 * sits between them — sharp enough that zooming resolves real detail, small
+	 * enough to pull over a phone connection — and every desktop GPU made in the
+	 * last decade takes an 8192px texture without complaint.
+	 */
+	large: { width: 8192, quality: 0.82 },
 	/**
 	 * Social card. Cropped to a slice of the horizon rather than the whole
 	 * sphere — a full equirectangular squashed into a link preview is unreadable.

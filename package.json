@@ -10,6 +10,7 @@
     "lint": "biome lint --write .",
     "check": "astro check",
     "og": "bun scripts/make-og.mjs",
+    "peaks": "bun scripts/bake-peaks.mjs",
     "format": "biome format --write .",
     "deploy": "astro build && rm -f dist/client/wrangler.json .wrangler/deploy/config.json && wrangler deploy",
     "preview": "astro build && rm -f dist/client/wrangler.json .wrangler/deploy/config.json && wrangler dev --local --ip 127.0.0.1 --log-level error"
@@ -24,8 +25,7 @@
     "@photo-sphere-viewer/core": "5.15.1",
     "@photo-sphere-viewer/gyroscope-plugin": "5.15.1",
     "@photo-sphere-viewer/map-plugin": "5.15.1",
-    "@photo-sphere-viewer/resolution-plugin": "5.15.1",
-    "@photo-sphere-viewer/settings-plugin": "5.15.1",
+    "@photo-sphere-viewer/markers-plugin": "5.15.1",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",

@@ -5,7 +5,7 @@
  * laptop doing the upload also does the resizing. That keeps the pipeline free
  * and means the viewer never has to pull a 40 MB original onto a phone.
  *
- * One decode, three outputs: the source is decoded once at archive width and
+ * One decode, every output: the source is decoded once at archive width and
  * every smaller size is drawn down from that same bitmap. Decoding a
  * 12000×6000 panorama three times would cost ~288 MB of RGBA per pass, which
  * is exactly how a phone tab gets killed mid-upload.
@@ -74,6 +74,12 @@ export interface Derivatives {
 	 * should store the source file untouched.
 	 */
 	archive: Derivative | null;
+	/**
+	 * 8192px — the middle rung between the boot texture and the archive. `null`
+	 * when the source was smaller than that, or when the encode failed; the
+	 * viewer then simply offers one rung fewer.
+	 */
+	large: Derivative | null;
 	preview: Derivative;
 	/** Social card — a horizon crop, not the whole squashed sphere. */
 	cover: Derivative;
@@ -84,7 +90,7 @@ export interface Derivatives {
 }
 
 /**
- * `onStep` reports 0–1 across the decode and the four encodes. Encoding 72 MP
+ * `onStep` reports 0–1 across the decode and the encodes that follow. Encoding 72 MP
  * takes long enough on a phone that a frozen progress bar reads as a hang.
  */
 export async function buildDerivatives(file: File, onStep?: (ratio: number) => void): Promise<Derivatives> {
@@ -122,8 +128,23 @@ export async function buildDerivatives(file: File, onStep?: (ratio: number) => v
 		})();
 		onStep?.(0.75);
 
+		/**
+		 * Only worth making when it is meaningfully smaller than the archive —
+		 * re-encoding a 8500px capture to 8192px buys nothing but a second file.
+		 */
+		const large = await (async () => {
+			const { width, quality } = DERIVATIVES.large;
+			if (bitmap.width < width * 1.15) return null;
+			try {
+				return await derive(width, quality, 0.82);
+			} catch {
+				return null;
+			}
+		})();
+
 		return {
 			archive,
+			large,
 			preview: await derive(DERIVATIVES.preview.width, DERIVATIVES.preview.quality, 0.9),
 			cover: await deriveCover(bitmap),
 			thumb: await derive(DERIVATIVES.thumb.width, DERIVATIVES.thumb.quality, 1),

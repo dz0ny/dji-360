@@ -11,7 +11,7 @@ via Cloudflare Access — but viewing is open to everyone.
 ## Key Pages
 
 - [Gallery](/) — every panorama, newest first
-- [Viewer](/view/?id=<id>) — a single panorama full-screen
+- [Viewer](/p/<id>/) — a single panorama full-screen, with its own link preview
 
 ## API
 
