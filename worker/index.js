@@ -10,6 +10,7 @@
  */
 
 import { handleApi, handleImage } from './photos.js';
+import { handleEmbed } from './embed.js';
 import { handlePano } from './pano.js';
 
 /**
@@ -19,6 +20,7 @@ import { handlePano } from './pano.js';
 const ROUTES = {
 	'/~/api/': { handler: handleApi, description: 'Panorama JSON API' },
 	'/~/img/': { handler: handleImage, description: 'Panorama image delivery' },
+	'/embed/': { handler: handleEmbed, description: 'Embeddable panorama viewer' },
 	'/p/': { handler: handlePano, description: 'Per-panorama share page' },
 };
 

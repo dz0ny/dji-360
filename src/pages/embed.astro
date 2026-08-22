@@ -1,0 +1,46 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import PanoViewer from "@/components/PanoViewer.astro";
+
+/*
+  A deliberately small viewer for third-party pages. The worker serves this
+  shell at `/embed/<id>/`; `?id=` remains useful for local previews.
+ */
+---
+
+<Layout title="Embedded panorama" noindex bare>
+  <div class="h-dvh w-full overflow-hidden bg-black">
+    <PanoViewer id="embed-stage" class="h-full w-full" twoFingers={false} controls={true} />
+
+    <p
+      class="absolute inset-0 z-30 hidden place-items-center bg-black p-8 text-center font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-white/70"
+      data-embed-error
+      role="alert"
+    ></p>
+  </div>
+</Layout>
+
+<script>
+  import { API } from "@/config";
+
+  const ID_RE = /^[a-z0-9][a-z0-9-]{4,63}$/;
+  const errorEl = document.querySelector<HTMLElement>("[data-embed-error]");
+  const id =
+    window.location.pathname.match(/^\/embed\/([^/]+)\/?$/)?.[1] ??
+    new URLSearchParams(window.location.search).get("id") ??
+    "";
+
+  if (!ID_RE.test(id)) {
+    if (errorEl) {
+      errorEl.textContent = "No panorama selected.";
+      errorEl.classList.remove("hidden");
+      errorEl.classList.add("grid");
+    }
+  } else {
+    document.dispatchEvent(
+      new CustomEvent("pano:load", {
+        detail: { target: "#embed-stage", src: `${API.img}/preview/${encodeURIComponent(id)}` },
+      }),
+    );
+  }
+</script>
