@@ -46,65 +46,88 @@ const schema: WithContext<CollectionPage> = {
 ---
 
 <Layout title="Map" description={DESCRIPTION} schema={schema}>
-  <section class="mx-auto max-w-[1600px] px-[var(--spacing-gutter)] pt-10" aria-labelledby="map-title">
-    <div class="mb-5 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b border-border/70 pb-4">
-      <div>
-        <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary animate-rise">
-          Flight map
-        </p>
-        <h1
-          id="map-title"
-          class="mt-2 font-display text-[clamp(1.75rem,5vw,3rem)] font-extrabold leading-[0.95] tracking-[-0.03em] animate-rise [animation-delay:100ms]"
-        >
-          Where these were shot
-        </h1>
-      </div>
+  {/*
+    Full bleed: the map is the page, not an illustration on it. It fills
+    everything under the sticky header, and the title and the counts ride on top
+    of it as glass panels rather than pushing it down the page.
+  */}
+  <section class="relative border-b border-border/70 bg-muted" aria-labelledby="map-title">
+    <div
+      id="flight-map"
+      class="h-[calc(100dvh-3.25rem)] min-h-[420px] w-full"
+      role="application"
+      aria-label="Map of panorama locations"
+    ></div>
+
+    <div class="map-panel map-panel--title">
+      <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary animate-rise">
+        Flight map
+      </p>
+      <h1
+        id="map-title"
+        class="mt-1.5 font-display text-[clamp(1.375rem,3.4vw,2.25rem)] font-extrabold leading-[0.95] tracking-[-0.03em] animate-rise [animation-delay:100ms]"
+      >
+        Where these were shot
+      </h1>
 
       <dl
-        class="grid grid-cols-3 gap-x-6 gap-y-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] animate-rise [animation-delay:200ms] sm:grid-cols-[auto_auto] sm:justify-end sm:gap-x-4 sm:text-right"
+        class="mt-3 flex gap-x-5 border-t border-border/60 pt-2.5 font-mono text-[0.625rem] uppercase tracking-[0.16em] animate-rise [animation-delay:200ms]"
       >
-        <div class="sm:contents">
+        <div>
           <dt class="text-muted-foreground">Pinned</dt>
-          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-pinned>—</dd>
+          <dd class="mt-0.5 text-sm font-bold tracking-normal text-foreground" data-stat-pinned>—</dd>
         </div>
-        <div class="sm:contents">
+        <div>
           <dt class="text-muted-foreground">Sites</dt>
-          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-sites>—</dd>
+          <dd class="mt-0.5 text-sm font-bold tracking-normal text-foreground" data-stat-sites>—</dd>
         </div>
-        <div class="sm:contents">
+        <div>
           <dt class="text-muted-foreground">Unlocated</dt>
-          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-missing>—</dd>
+          <dd class="mt-0.5 text-sm font-bold tracking-normal text-foreground" data-stat-missing>—</dd>
         </div>
       </dl>
-    </div>
-  </section>
 
-  <section class="mx-auto max-w-[1600px] px-[var(--spacing-gutter)] pb-[var(--spacing-section)]">
-    <div class="relative overflow-hidden rounded-lg border border-border/70 bg-muted shadow-soft">
-      <div
-        id="flight-map"
-        class="h-[62dvh] min-h-[380px] w-full lg:h-[calc(100dvh-15rem)] lg:min-h-[540px]"
-        role="application"
-        aria-label="Map of panorama locations"
-      ></div>
-
-      {/* Telemetry. Whatever the map is centred on, in the camera's own units. */}
-      <p class="map-readout" data-map-readout aria-hidden="true"></p>
-
-      {/* Covers the map until MapLibre paints, so tiles never fade in over a bare box. */}
-      <div
-        class="pointer-events-none absolute inset-0 z-[600] grid place-items-center bg-muted font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-500"
-        data-map-veil
-      >
-        Loading the map
-      </div>
+      <p class="mt-3 hidden text-sm text-destructive" data-map-error role="alert"></p>
     </div>
 
-    <p class="mt-3 hidden text-sm text-destructive" data-map-error role="alert"></p>
+    {/* Telemetry. Whatever the map is centred on, in the camera's own units. */}
+    <p class="map-readout" data-map-readout aria-hidden="true"></p>
+
+    {/* Covers the map until MapLibre paints, so tiles never fade in over a bare box. */}
+    <div
+      class="pointer-events-none absolute inset-0 z-[600] grid place-items-center bg-muted font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-500"
+      data-map-veil
+    >
+      Loading the map
+    </div>
+
+    {/* Reachable by keyboard and screen reader, unlike dots drawn on a canvas. */}
+    <h2 class="sr-only">Panorama locations</h2>
+    <ul class="sr-only" data-map-index></ul>
   </section>
 </Layout>
 
 <style>
+  /* The heading rides on the map now, so it needs the same glass the readout
+     has always used — and a hard cap on its width, or a long line would run
+     under the zoom controls on a narrow window. */
+  .map-panel {
+    position: absolute;
+    z-index: 500;
+    max-width: min(24rem, calc(100% - 6.5rem));
+    padding: 0.75rem 0.875rem 0.875rem;
+    border: 1px solid hsl(var(--border) / 0.8);
+    border-radius: var(--radius);
+    background: hsl(var(--background) / 0.82);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-2);
+  }
+
+  .map-panel--title {
+    top: 0.75rem;
+    left: 0.75rem;
+  }
+
   /* Bottom-left so it never collides with MapLibre's attribution, which is
      pinned bottom-right and must stay legible. */
   .map-readout {
@@ -130,6 +153,14 @@ const schema: WithContext<CollectionPage> = {
 
   .map-readout:not(:empty) {
     opacity: 1;
+  }
+
+  /* On a narrow window the attribution runs the full width of the map, so the
+     readout steps up out of its way rather than sitting on top of it. */
+  @media (max-width: 34rem) {
+    .map-readout {
+      bottom: 2.25rem;
+    }
   }
 
   .map-readout b {
@@ -216,121 +247,6 @@ const schema: WithContext<CollectionPage> = {
      is in rather than leaving the reader to guess from the horizon. */
   #flight-map .maplibregl-ctrl-terrain-enabled {
     background: hsl(var(--brand-primary) / 0.18);
-  }
-
-  /* ── Pins ──────────────────────────────────────────────────────────────
-     A divIcon rather than Leaflet's default PNG pin: the bundled image paths
-     break under Vite, and a CSS dot can take the brand colour, a count, and a
-     viewfinder cone. */
-  .pano-pin {
-    position: relative;
-    display: grid;
-    place-items: center;
-    /* Matches the map plugin's own pin: an 18px dot inside a 2px light ring
-       (its pin.svg draws r=190 white under r=150 colour at pinSize 35). */
-    width: 1.25rem;
-    height: 1.25rem;
-    border-radius: 9999px;
-    border: 2px solid hsl(var(--background));
-    background: hsl(var(--brand-primary));
-    color: hsl(var(--brand-accent-foreground));
-    box-shadow: 0 2px 12px hsl(0 0% 0% / 0.5);
-    font-family: var(--type-meta);
-    font-size: 0.5625rem;
-    font-weight: 700;
-    line-height: 1;
-    /* MOTION: pins drop in one after another once the map has framed them.
-       `backwards` keeps the start state during the delay and hands the element
-       back to its own transform afterwards, so hover still scales cleanly. */
-    animation: pin-drop 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-    animation-delay: var(--pin-delay, 0ms);
-    transition:
-      transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
-      background-color 180ms ease;
-  }
-
-  @keyframes pin-drop {
-    from {
-      opacity: 0;
-      transform: translateY(-0.75rem) scale(0.4);
-    }
-  }
-
-  /*
-    Which way the centre of the frame faces, when the camera recorded it — the
-    same heading the peak labels are placed against. Sites without one get a
-    plain dot rather than a guessed direction.
-
-    Shaped as the same translucent viewfinder cone the Photo Sphere Viewer map
-    plugin draws around its own pin, so a site reads identically here and inside
-    the panorama: a wedge fanning out from the dot, fading with distance.
-  */
-  .pano-pin-wrap {
-    position: relative;
-    display: block;
-    width: 1.25rem;
-    height: 1.25rem;
-  }
-
-  /*
-    The plugin fills a circular sector on canvas: a `coneSize` radius, an arc
-    spanning the current horizontal FOV centred on the view, and a radial
-    gradient that is solid out to `coneSize / 4` and transparent at the rim.
-    Same numbers here — 40px radius, ~70deg spread — with a conic mask standing
-    in for the arc, so the wedge keeps its rounded outer edge.
-  */
-  .pano-pin__cone {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 5rem;
-    height: 5rem;
-    margin: -2.5rem 0 0 -2.5rem;
-    pointer-events: none;
-    background: radial-gradient(
-      circle at 50% 50%,
-      hsl(var(--brand-primary)) 25%,
-      hsl(var(--brand-primary) / 0) 100%
-    );
-    /* `from` is measured clockwise from twelve o'clock — the same convention
-       the heading is recorded in, so no extra rotation is needed. */
-    --cone-mask: conic-gradient(
-      from calc(var(--heading, 0deg) - 35deg),
-      #000 0deg 70deg,
-      transparent 70deg
-    );
-    -webkit-mask-image: var(--cone-mask);
-    mask-image: var(--cone-mask);
-    opacity: 0.75;
-    animation: cone-in 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-    animation-delay: var(--pin-delay, 0ms);
-    transition:
-      background 180ms ease,
-      opacity 180ms ease;
-  }
-
-  @keyframes cone-in {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .pano-pin-wrap:has(.pano-pin[data-active]) .pano-pin__cone,
-  .pano-pin-wrap:focus-visible .pano-pin__cone,
-  .pano-pin-wrap:hover .pano-pin__cone {
-    background: radial-gradient(
-      circle at 50% 50%,
-      hsl(var(--brand-accent)) 25%,
-      hsl(var(--brand-accent) / 0) 100%
-    );
-    opacity: 0.9;
-  }
-
-  .pano-pin-wrap:focus-visible .pano-pin,
-  .pano-pin:hover,
-  .pano-pin[data-active] {
-    transform: scale(1.25);
-    background: hsl(var(--brand-accent));
   }
 
   /* ── Popup ─────────────────────────────────────────────────────────────
@@ -454,7 +370,7 @@ const schema: WithContext<CollectionPage> = {
 
 <script>
   import * as maplibregl from "maplibre-gl";
-  import type { StyleSpecification } from "maplibre-gl";
+  import type { GeoJSONSourceSpecification, StyleSpecification } from "maplibre-gl";
   /*
     MapLibre 6 ships its worker as a sibling file and resolves it against its
     own `import.meta.url`, which points into `/_astro/` once Vite has bundled
@@ -492,7 +408,10 @@ const schema: WithContext<CollectionPage> = {
   const veilEl = document.querySelector<HTMLElement>("[data-map-veil]");
   const readoutEl = document.querySelector<HTMLElement>("[data-map-readout]");
 
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const indexEl = document.querySelector<HTMLElement>("[data-map-index]");
+
+  /** Source and layer share one id — there is exactly one of each. */
+  const SITES = "sites";
 
   function setStat(selector: string, value: string) {
     const el = document.querySelector<HTMLElement>(selector);
@@ -592,29 +511,34 @@ const schema: WithContext<CollectionPage> = {
   }
 
   /**
-   * MapLibre markers take a DOM node rather than an HTML string, and unlike
-   * Leaflet's they are not focusable on their own — hence the explicit button
-   * role, so the pins stay reachable from the keyboard.
+   * The sites as one GeoJSON layer rather than one DOM node each.
+   *
+   * HTML markers are positioned by MapLibre on every frame from JS, which under
+   * a tilted camera over terrain means they lag the basemap while it moves and
+   * drift as the DEM resolves. A circle layer is drawn by the same GPU pass as
+   * the map itself, so the dots are welded to the ground and cannot skew.
    */
-  function pinElement(site: Site, index: number): HTMLElement {
-    const count = site.photos.length;
-    // Stagger the drop-in, but cap it so a long archive is not still landing
-    // pins after a second and a half.
-    const delay = reducedMotion ? 0 : Math.min(index, 12) * 45;
-    // The cone is only honest when a camera actually recorded the heading.
-    const heading = site.photos.find((photo) => photo.heading != null)?.heading;
-    const cone =
-      heading == null
-        ? ""
-        : `<span class="pano-pin__cone" style="--heading:${heading}deg;--pin-delay:${delay}ms"></span>`;
+  function siteCollection(sites: Site[]): GeoJSONSourceSpecification["data"] {
+    return {
+      type: "FeatureCollection",
+      features: sites.map((site, index) => ({
+        type: "Feature",
+        // Numeric ids are what `setFeatureState` addresses a feature by.
+        id: index,
+        geometry: { type: "Point", coordinates: [site.lon, site.lat] },
+        properties: { index, count: site.photos.length },
+      })),
+    };
+  }
 
-    const el = document.createElement("div");
-    el.className = "pano-pin-wrap";
-    el.tabIndex = 0;
-    el.setAttribute("role", "button");
-    el.setAttribute("aria-label", siteLabel(site));
-    el.innerHTML = `${cone}<span class="pano-pin" style="--pin-delay:${delay}ms">${count > 1 ? count : ""}</span>`;
-    return el;
+  /**
+   * Paint properties are plain colour values — the palette's custom properties
+   * mean nothing to WebGL. A hidden probe resolves one through the real cascade,
+   * so the dots track whichever palette is in force.
+   */
+  function themeColor(probe: HTMLElement, token: string): string {
+    probe.style.color = `hsl(var(${token}))`;
+    return getComputedStyle(probe).color;
   }
 
   /**
@@ -627,7 +551,12 @@ const schema: WithContext<CollectionPage> = {
     const center = map.getCenter();
     const ns = center.lat >= 0 ? "N" : "S";
     const ew = center.lng >= 0 ? "E" : "W";
-    const ground = map.queryTerrainElevation(center);
+    /*
+      `queryTerrainElevation` answers 0 for a point whose DEM tile has not
+      landed yet rather than admitting it does not know. Nothing in this archive
+      sits at sea level, so a flat zero is read as "not yet" and left out.
+    */
+    const ground = map.queryTerrainElevation(center) || null;
     readoutEl.innerHTML =
       `${Math.abs(center.lat).toFixed(4)}°${ns} ${Math.abs(center.lng).toFixed(4)}°${ew}` +
       ` <b>Z${map.getZoom().toFixed(1)}</b>` +
@@ -749,49 +678,133 @@ const schema: WithContext<CollectionPage> = {
       { passive: false },
     );
 
-    const markers = sites.map((site, index) => {
-      const popup = new maplibregl.Popup({
-        maxWidth: "260px",
-        closeButton: true,
-        // Clear of the dot, which is anchored on its own centre.
-        offset: 16,
-      }).setHTML(popupHtml(site));
+    /*
+      One popup, reused. The dots live in the style, so there is no per-site DOM
+      to hang a popup off — it is moved to whichever dot was clicked.
+    */
+    const popup = new maplibregl.Popup({
+      maxWidth: "260px",
+      closeButton: true,
+      // Clear of the dot, which is drawn centred on its own coordinate.
+      offset: 14,
+    });
 
-      const element = pinElement(site, index);
-      const marker = new maplibregl.Marker({ element, anchor: "center" })
-        .setLngLat([site.lon, site.lat])
-        .setPopup(popup)
-        .addTo(map);
+    let activeIndex: number | null = null;
 
-      // MapLibre binds the popup to a click; the keyboard has to be wired up.
-      element.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        marker.togglePopup();
+    /* An open popup keeps its own dot lit. With sites packed this close the
+       reader otherwise loses track of which one they opened. */
+    const setActive = (index: number | null) => {
+      if (activeIndex != null) map.setFeatureState({ source: SITES, id: activeIndex }, { active: false });
+      activeIndex = index;
+      if (index != null) map.setFeatureState({ source: SITES, id: index }, { active: true });
+    };
+
+    popup.on("close", () => setActive(null));
+
+    const openSite = (index: number) => {
+      const site = sites[index];
+      if (!site) return;
+      popup.setLngLat([site.lon, site.lat]).setHTML(popupHtml(site)).addTo(map);
+      const node = popup.getElement();
+      if (node) coverFallback(node);
+      setActive(index);
+    };
+
+    const probe = document.createElement("span");
+    probe.style.display = "none";
+    container.appendChild(probe);
+
+    const paintSites = () => {
+      if (!map.getLayer(SITES)) return;
+      map.setPaintProperty(SITES, "circle-color", [
+        "case",
+        ["boolean", ["feature-state", "active"], false],
+        themeColor(probe, "--brand-accent"),
+        ["boolean", ["feature-state", "hover"], false],
+        themeColor(probe, "--brand-accent"),
+        themeColor(probe, "--brand-primary"),
+      ]);
+      map.setPaintProperty(SITES, "circle-stroke-color", themeColor(probe, "--background"));
+    };
+
+    const addSites = () => {
+      map.addSource(SITES, { type: "geojson", data: siteCollection(sites) });
+      map.addLayer({
+        id: SITES,
+        type: "circle",
+        source: SITES,
+        paint: {
+          /*
+            The plugin's pin proportions, held roughly steady across zoom: an
+            18px dot inside a 2px ring, growing a little as the map closes in
+            and a little more where several flights share one take-off point.
+          */
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            6,
+            ["case", [">", ["get", "count"], 1], 6, 5],
+            12,
+            ["case", [">", ["get", "count"], 1], 11, 9],
+          ],
+          "circle-stroke-width": 2,
+          // Terrain would otherwise sink a dot into the hillside it sits on.
+          "circle-pitch-alignment": "viewport",
+        },
       });
+      paintSites();
+    };
 
-      popup.on("open", () => {
-        const node = popup.getElement();
-        if (node) coverFallback(node);
-        setActive(index);
-      });
-      popup.on("close", () => setActive(null));
+    // The style is handed to the constructor, so it is normally still loading —
+    // but not always, and adding a layer twice throws.
+    if (map.isStyleLoaded()) addSites();
+    else map.once("style.load", addSites);
 
-      return marker;
+    // The palette follows the OS, and the dots are painted rather than styled.
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintSites);
+
+    let hovered: number | null = null;
+    map.on("mousemove", SITES, (event) => {
+      const index = event.features?.[0]?.id;
+      map.getCanvas().style.cursor = "pointer";
+      if (typeof index !== "number" || index === hovered) return;
+      if (hovered != null) map.setFeatureState({ source: SITES, id: hovered }, { hover: false });
+      hovered = index;
+      map.setFeatureState({ source: SITES, id: index }, { hover: true });
+    });
+
+    map.on("mouseleave", SITES, () => {
+      map.getCanvas().style.cursor = "";
+      if (hovered != null) map.setFeatureState({ source: SITES, id: hovered }, { hover: false });
+      hovered = null;
+    });
+
+    map.on("click", SITES, (event) => {
+      const index = event.features?.[0]?.properties?.index;
+      if (typeof index === "number") openSite(index);
     });
 
     /*
-      An open popup keeps its own pin lit. With pins packed this close the
-      reader otherwise loses track of which one they opened.
+      A layer drawn on a canvas is reachable by neither keyboard nor screen
+      reader, which the old DOM pins at least were. The same sites are listed
+      off-screen, as plain links straight to the panoramas.
     */
-    function setActive(index: number | null) {
-      markers.forEach((marker, i) => {
-        const pin = marker.getElement().querySelector<HTMLElement>(".pano-pin");
-        pin?.toggleAttribute("data-active", i === index);
-      });
+    if (indexEl) {
+      indexEl.innerHTML = sites
+        .map(
+          (site) =>
+            `<li><a href="${viewUrl(site.photos[0].id)}">${escapeHtml(siteLabel(site))} — ${escapeHtml(formatCoords(site.photos[0]))}</a></li>`,
+        )
+        .join("");
     }
 
     map.on("move", () => renderReadout(map));
+    // The elevation arrives with the DEM, which is usually later than the move
+    // that asked for it.
+    map.on("sourcedata", (event) => {
+      if (event.sourceId === "terrain" && event.isSourceLoaded) renderReadout(map);
+    });
 
     /*
       `fitBounds` solves for the container's pixel size, and MapLibre measured
@@ -805,7 +818,25 @@ const schema: WithContext<CollectionPage> = {
       if (sites.length === 1) {
         map.jumpTo({ center: bounds.getCenter(), zoom: 14, pitch: PITCH });
       } else {
-        map.fitBounds(bounds, { padding: 56, maxZoom: 15, pitch: PITCH, duration: 0 });
+        /*
+          Bottom-weighted padding, not an even ring: under a tilted camera the
+          near edge of the frame covers far less ground than the far edge, so an
+          even fit drops the southernmost pins off the bottom of the map.
+        */
+        map.fitBounds(bounds, {
+          // Proportional, not a fixed number of pixels: the map is as tall as
+          // the window, so a constant that framed a short map leaves a tall one
+          // with the whole cluster pushed into its top third.
+          padding: {
+            top: 48,
+            right: 56,
+            bottom: Math.round(container.clientHeight * 0.22),
+            left: 56,
+          },
+          maxZoom: 15,
+          pitch: PITCH,
+          duration: 0,
+        });
       }
       renderReadout(map);
     };

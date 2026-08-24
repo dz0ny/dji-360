@@ -233,11 +233,19 @@ import PanoViewer from "@/components/PanoViewer.astro";
   let placed: PlacedPeak[] = [];
   /*
     The summits button lives in the viewer's control pill, so this page no
-    longer holds it as an element — it mirrors its two bits of state and posts
-    them over. Summits need coordinates, so a panorama without them has no
-    button at all.
+    longer holds it as an element — it owns the state and posts it over.
+    Summits need coordinates, so a panorama without them has no button at all.
+
+    Three states, cycled by the one button: nothing, labels on the sphere, then
+    labels plus the list panel. Labels default to on, which is what the viewer
+    did before there was any way to turn them off; a crowded skyline is the
+    reason there is one now.
   */
+  type PeaksState = "off" | "labels" | "panel";
+  const PEAKS_CYCLE: Record<PeaksState, PeaksState> = { off: "labels", labels: "panel", panel: "off" };
+
   let peaksAvailable = false;
+  let peaksState: PeaksState = "labels";
   /** The heading being previewed, which is the stored one until an admin drags. */
   let heading: number | null = null;
   let isAdmin = false;
@@ -384,30 +392,44 @@ import PanoViewer from "@/components/PanoViewer.astro";
     // Arrows and +/− are the sphere's; these are the page's.
     if (event.key === "[" || event.key === "p") step(-1);
     else if (event.key === "]" || event.key === "n") step(1);
-    else if (event.key === "l") togglePanel();
+    else if (event.key === "l") setPeaksState(PEAKS_CYCLE[peaksState]);
   });
 
   // --- peaks ----------------------------------------------------------------
 
   /** Tell the viewer's pill whether to show the button, and how to draw it. */
-  function paintPeaksButton(active: boolean) {
+  function paintPeaksButton() {
     document.dispatchEvent(
       new CustomEvent("pano:peaks-button", {
-        detail: { target: "#stage", available: peaksAvailable, active, controls: "peaks-panel" },
+        detail: { target: "#stage", available: peaksAvailable, state: peaksState, controls: "peaks-panel" },
       }),
     );
   }
 
-  function togglePanel(force?: boolean) {
-    if (!panelEl || !peaksAvailable) return;
-    const open = force ?? !panelEl.hasAttribute("data-open");
-    panelEl.hidden = false;
-    panelEl.toggleAttribute("data-open", open);
-    paintPeaksButton(open);
+  /**
+   * The one place the three states are made real: labels on the sphere for the
+   * last two, the panel for the last one only.
+   */
+  function applyPeaksState() {
+    if (panelEl) {
+      panelEl.hidden = false;
+      panelEl.toggleAttribute("data-open", peaksState === "panel");
+    }
+    applyMarkers();
+    paintPeaksButton();
   }
 
-  document.addEventListener("pano:peaks-toggle", () => togglePanel());
-  document.querySelector("[data-peaks-close]")?.addEventListener("click", () => togglePanel(false));
+  function setPeaksState(next: PeaksState) {
+    if (!peaksAvailable) return;
+    peaksState = next;
+    applyPeaksState();
+  }
+
+  document.addEventListener("pano:peaks-toggle", () => setPeaksState(PEAKS_CYCLE[peaksState]));
+
+  // Closing the panel by its own × steps back to labels-only rather than all
+  // the way off — the reader dismissed a list, not the summits.
+  document.querySelector("[data-peaks-close]")?.addEventListener("click", () => setPeaksState("labels"));
 
   function setStatus(message: string) {
     if (peaksStatusEl) peaksStatusEl.textContent = message;
@@ -448,14 +470,17 @@ import PanoViewer from "@/components/PanoViewer.astro";
     }
   }
 
-  /** Push the labels onto the sphere — or clear them, if north is unknown. */
+  /**
+   * Push the labels onto the sphere — or clear them, when north is unknown or
+   * the reader has switched them off.
+   */
   function applyMarkers() {
     document.dispatchEvent(
       new CustomEvent("pano:peaks", {
         detail: {
           target: "#stage",
           peaks:
-            heading == null
+            heading == null || peaksState === "off"
               ? []
               : placed.map((peak) => ({
                   id: `peak-${peak.name}-${Math.round(peak.bearing)}`,
@@ -483,14 +508,18 @@ import PanoViewer from "@/components/PanoViewer.astro";
     renderPeakList();
 
     if (photo.lat == null || photo.lon == null) {
-      togglePanel(false);
       peaksAvailable = false;
-      paintPeaksButton(false);
+      peaksState = "labels";
+      panelEl?.removeAttribute("data-open");
+      paintPeaksButton();
       return;
     }
 
     peaksAvailable = true;
-    paintPeaksButton(panelEl?.hasAttribute("data-open") ?? false);
+    // A new panorama starts with its labels up and the list closed, whatever
+    // the last one was left on: the summits are different summits.
+    peaksState = "labels";
+    applyPeaksState();
     if (calibrateEl) calibrateEl.hidden = !isAdmin;
     if (headingInput) headingInput.value = String(Math.round(photo.heading ?? 0));
     setStatus("Looking up summits…");

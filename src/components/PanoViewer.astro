@@ -343,10 +343,27 @@ const {
     }
   }
 
-  /* Pressed means the panel is open, which is a state worth seeing at a glance
-     — the panel itself slides in from the right and can be scrolled past. */
-  .pano .psv-button.pano-peaks[aria-pressed='true'] {
+  /*
+    Three states, drawn rather than only tinted: off is the glyph at rest, the
+    lit cyan says the labels are on the sphere, and the bar down the right edge
+    appears when the list panel is open too. Colour alone would leave two of the
+    three indistinguishable to anyone who cannot separate them.
+  */
+  .pano .psv-button.pano-peaks[data-peaks-state='off'] {
+    color: rgb(255 255 255 / 0.55);
+  }
+
+  .pano .psv-button.pano-peaks[data-peaks-state='labels'],
+  .pano .psv-button.pano-peaks[data-peaks-state='panel'] {
     color: hsl(var(--chrome-accent));
+  }
+
+  /* The two parts that come and go — the panel bar, and the snow line that
+     drops out when the labels are off — are switched by `paintPeaksButton`,
+     which sets their opacity on the node. All this contributes is the fade. */
+  .pano .pano-peaks .peaks-icon__panel,
+  .pano .pano-peaks .peaks-icon__snow {
+    transition: opacity 180ms ease;
   }
 
   /*
@@ -717,24 +734,66 @@ const {
   */
   const PEAKS_BUTTON_ID = "peaks";
 
+  /*
+    A mountain, plus a bar down the right edge standing in for the list panel.
+    The bar is only drawn in the third state, so the glyph itself says which of
+    the three the button is in rather than relying on colour alone.
+  */
   const PEAKS_ICON =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">' +
-    '<path d="M3 20 10 7l4 7 2-3 5 9z"/><path d="m7.6 13 2.4 1.4L12.4 13"/></svg>';
+    '<path class="peaks-icon__mount" d="M2 19 8.5 7l4 7 2-3 4.5 8z"/>' +
+    '<path class="peaks-icon__snow" d="m6.4 12.4 2.1 1.3 2.1-1.3"/>' +
+    '<path class="peaks-icon__panel" d="M21.5 4.5v15" stroke-linecap="round"/>' +
+    "</svg>";
+
+  /** off → labels on the sphere → labels and the list → off. */
+  type PeaksState = "off" | "labels" | "panel";
+
+  const PEAKS_NEXT: Record<PeaksState, string> = {
+    off: "Summits hidden. Show the labels.",
+    labels: "Summit labels on. Show the list as well.",
+    panel: "Summit labels and list on. Turn them off.",
+  };
 
   /**
-   * Whether the button is there, and whether the panel behind it is open.
+   * Which of the three states the button is in, and whether it belongs on the
+   * pill at all.
    *
    * Both are the page's business, not the viewer's: summits need coordinates,
-   * and a panorama without them has nothing to list. The button therefore ships
-   * hidden and stays hidden until someone says otherwise.
+   * and a panorama without them has nothing to label. The button therefore
+   * ships hidden and stays hidden until someone says otherwise.
    */
-  function paintPeaksButton(el: PanoElement, viewer: Viewer, available: boolean, active: boolean, controls?: string) {
+  function paintPeaksButton(
+    el: PanoElement,
+    viewer: Viewer,
+    available: boolean,
+    state: PeaksState,
+    controls?: string,
+  ) {
     const button = viewer.navbar.getButton(PEAKS_BUTTON_ID, false)?.container;
     if (!button) return;
 
     button.style.display = available ? "" : "none";
-    button.setAttribute("aria-pressed", String(active && available));
-    button.setAttribute("aria-label", active ? "Hide the summit list" : "Show the summit list");
+    button.dataset.peaksState = state;
+
+    /*
+      The two icon parts that change are set here rather than by an attribute
+      selector on the button. PSV writes the SVG itself, and a rule reaching
+      from the button down into markup a plugin owns is one refactor away from
+      silently not applying — which is exactly what it did. Setting the property
+      on the node leaves nothing to the cascade; the transition still comes from
+      CSS, so it still fades.
+    */
+    const panelBar = button.querySelector<SVGElement>(".peaks-icon__panel");
+    if (panelBar) panelBar.style.opacity = state === "panel" ? "1" : "0";
+
+    const snow = button.querySelector<SVGElement>(".peaks-icon__snow");
+    if (snow) snow.style.opacity = state === "off" ? "0" : "1";
+    // Three states, so `aria-pressed` cannot describe it — the name carries
+    // where it is and what a tap does next. `aria-expanded` still tracks the
+    // panel, which is the part that has a controlled element.
+    button.setAttribute("aria-label", PEAKS_NEXT[state]);
+    button.setAttribute("aria-expanded", String(state === "panel"));
     if (controls) button.setAttribute("aria-controls", controls);
   }
 
@@ -1065,7 +1124,7 @@ const {
     if (quality) paintQualityButton(el, viewer);
 
     // Same for summits: hidden until the page has coordinates to justify it.
-    if (el.dataset.peaks === "true") paintPeaksButton(el, viewer, false, false);
+    if (el.dataset.peaks === "true") paintPeaksButton(el, viewer, false, "off");
 
     /*
       Reveal the stage on the first texture rather than only on `ready`.
@@ -1261,10 +1320,10 @@ const {
 
   /** The other half of `pano:peaks-toggle`: the page answering about its panel. */
   document.addEventListener("pano:peaks-button", async (event: Event) => {
-    const { target, available, active, controls } = (event as CustomEvent).detail as {
+    const { target, available, state, controls } = (event as CustomEvent).detail as {
       target: string;
       available: boolean;
-      active?: boolean;
+      state?: PeaksState;
       controls?: string;
     };
     const el = document.querySelector<PanoElement>(target);
@@ -1275,7 +1334,7 @@ const {
     const viewer = (await el._panoBoot) ?? el._panoViewer;
     if (!viewer) return;
 
-    paintPeaksButton(el, viewer, available, active ?? false, controls);
+    paintPeaksButton(el, viewer, available, state ?? "off", controls);
   });
 
   // Let other scripts (the gallery's lightbox) drive a viewer directly.
