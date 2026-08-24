@@ -455,6 +455,15 @@ const schema: WithContext<CollectionPage> = {
 <script>
   import * as maplibregl from "maplibre-gl";
   import type { StyleSpecification } from "maplibre-gl";
+  /*
+    MapLibre 6 ships its worker as a sibling file and resolves it against its
+    own `import.meta.url`, which points into `/_astro/` once Vite has bundled
+    it — where no such sibling exists. `?worker&url` makes Vite emit the worker
+    as its own asset and hand back the hashed URL to point MapLibre at.
+  */
+  import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+  maplibregl.setWorkerUrl(maplibreWorkerUrl);
   import {
     displayTitle,
     escapeHtml,

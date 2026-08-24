@@ -24,14 +24,15 @@ import PanoViewer from "@/components/PanoViewer.astro";
         Sized with h-full rather than `absolute inset-0` — the component root is
         already `relative`, and Tailwind's stylesheet order makes that win over a
         caller's `absolute`, which would collapse the sphere to zero height. */}
-    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers />
+    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers peaks />
 
     <div
       data-pano-chrome
       class="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 to-transparent pb-12 transition-opacity duration-300"
       style="padding-top:max(0.75rem, env(safe-area-inset-top))"
     >
-      {/* Everything stays on the left: the minimap owns the top-right corner. */}
+      {/* Leaving, and moving between panoramas. Anything you do *to* the
+          panorama in front of you lives in the control pill at the bottom. */}
       <div class="flex flex-wrap items-center gap-1.5 px-3">
         <a href="/" class="view-chip">
           <span aria-hidden="true">←</span> Gallery
@@ -43,10 +44,6 @@ import PanoViewer from "@/components/PanoViewer.astro";
         </button>
         <button type="button" class="view-chip view-chip--icon" data-view-next aria-label="Next panorama" hidden>
           <span aria-hidden="true">›</span>
-        </button>
-
-        <button type="button" class="view-chip" data-view-peaks aria-pressed="false" aria-controls="peaks-panel" hidden>
-          Peaks
         </button>
       </div>
     </div>
@@ -145,11 +142,6 @@ import PanoViewer from "@/components/PanoViewer.astro";
     background: rgb(0 0 0 / 0.7);
   }
 
-  .view-chip[aria-pressed="true"] {
-    background: hsl(var(--chrome-accent) / 0.9);
-    color: black;
-  }
-
   .view-chip[disabled] {
     opacity: 0.35;
     pointer-events: none;
@@ -228,7 +220,6 @@ import PanoViewer from "@/components/PanoViewer.astro";
   const errorEl = document.querySelector<HTMLElement>("[data-view-error]");
   const prevEl = document.querySelector<HTMLButtonElement>("[data-view-prev]");
   const nextEl = document.querySelector<HTMLButtonElement>("[data-view-next]");
-  const peaksToggle = document.querySelector<HTMLButtonElement>("[data-view-peaks]");
   const panelEl = document.querySelector<HTMLElement>("#peaks-panel");
   const peaksListEl = document.querySelector<HTMLElement>("[data-peaks-list]");
   const peaksStatusEl = document.querySelector<HTMLElement>("[data-peaks-status]");
@@ -240,6 +231,13 @@ import PanoViewer from "@/components/PanoViewer.astro";
   let photos: Photo[] = [];
   let current: Photo | null = null;
   let placed: PlacedPeak[] = [];
+  /*
+    The summits button lives in the viewer's control pill, so this page no
+    longer holds it as an element — it mirrors its two bits of state and posts
+    them over. Summits need coordinates, so a panorama without them has no
+    button at all.
+  */
+  let peaksAvailable = false;
   /** The heading being previewed, which is the stored one until an admin drags. */
   let heading: number | null = null;
   let isAdmin = false;
@@ -391,15 +389,24 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
   // --- peaks ----------------------------------------------------------------
 
+  /** Tell the viewer's pill whether to show the button, and how to draw it. */
+  function paintPeaksButton(active: boolean) {
+    document.dispatchEvent(
+      new CustomEvent("pano:peaks-button", {
+        detail: { target: "#stage", available: peaksAvailable, active, controls: "peaks-panel" },
+      }),
+    );
+  }
+
   function togglePanel(force?: boolean) {
-    if (!panelEl || !peaksToggle || peaksToggle.hidden) return;
+    if (!panelEl || !peaksAvailable) return;
     const open = force ?? !panelEl.hasAttribute("data-open");
     panelEl.hidden = false;
     panelEl.toggleAttribute("data-open", open);
-    peaksToggle.setAttribute("aria-pressed", String(open));
+    paintPeaksButton(open);
   }
 
-  peaksToggle?.addEventListener("click", () => togglePanel());
+  document.addEventListener("pano:peaks-toggle", () => togglePanel());
   document.querySelector("[data-peaks-close]")?.addEventListener("click", () => togglePanel(false));
 
   function setStatus(message: string) {
@@ -476,12 +483,14 @@ import PanoViewer from "@/components/PanoViewer.astro";
     renderPeakList();
 
     if (photo.lat == null || photo.lon == null) {
-      if (peaksToggle) peaksToggle.hidden = true;
       togglePanel(false);
+      peaksAvailable = false;
+      paintPeaksButton(false);
       return;
     }
 
-    if (peaksToggle) peaksToggle.hidden = false;
+    peaksAvailable = true;
+    paintPeaksButton(panelEl?.hasAttribute("data-open") ?? false);
     if (calibrateEl) calibrateEl.hidden = !isAdmin;
     if (headingInput) headingInput.value = String(Math.round(photo.heading ?? 0));
     setStatus("Looking up summits…");

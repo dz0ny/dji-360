@@ -43,6 +43,13 @@ interface Props {
 	hash?: boolean;
 	/** Load the markers plugin, which the peak labels need. */
 	markers?: boolean;
+	/**
+	 * Add the summits button to the control pill. The button only dispatches
+	 * `pano:peaks-toggle`; whoever owns the panel decides what that means, and
+	 * tells the button whether it should be there at all with
+	 * `pano:peaks-button`. The viewer knows nothing about mountains.
+	 */
+	peaks?: boolean;
 	class?: string;
 	id?: string;
 }
@@ -58,6 +65,7 @@ const {
 	intro = false,
 	hash = false,
 	markers = false,
+	peaks = false,
 	class: className = "",
 	id,
 } = Astro.props;
@@ -77,6 +85,7 @@ const {
   data-intro={String(intro)}
   data-hash={String(hash)}
   data-markers={String(markers)}
+  data-peaks={String(peaks)}
 >
   {/* Poster / fallback: whatever the caller slots in, usually a flat <Picture>. */}
   <div class="pano-poster absolute inset-0 transition-opacity duration-700" data-pano-poster>
@@ -332,6 +341,12 @@ const {
       animation: none;
       opacity: 0.6;
     }
+  }
+
+  /* Pressed means the panel is open, which is a state worth seeing at a glance
+     — the panel itself slides in from the right and can be scrolled past. */
+  .pano .psv-button.pano-peaks[aria-pressed='true'] {
+    color: hsl(var(--chrome-accent));
   }
 
   /*
@@ -696,6 +711,33 @@ const {
     }
   }
 
+  /*
+    The summits button. A triangle with a snow cap — the same shape the peak
+    labels point at, and small enough to read at 20px next to the quality bars.
+  */
+  const PEAKS_BUTTON_ID = "peaks";
+
+  const PEAKS_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 20 10 7l4 7 2-3 5 9z"/><path d="m7.6 13 2.4 1.4L12.4 13"/></svg>';
+
+  /**
+   * Whether the button is there, and whether the panel behind it is open.
+   *
+   * Both are the page's business, not the viewer's: summits need coordinates,
+   * and a panorama without them has nothing to list. The button therefore ships
+   * hidden and stays hidden until someone says otherwise.
+   */
+  function paintPeaksButton(el: PanoElement, viewer: Viewer, available: boolean, active: boolean, controls?: string) {
+    const button = viewer.navbar.getButton(PEAKS_BUTTON_ID, false)?.container;
+    if (!button) return;
+
+    button.style.display = available ? "" : "none";
+    button.setAttribute("aria-pressed", String(active && available));
+    button.setAttribute("aria-label", active ? "Hide the summit list" : "Show the summit list");
+    if (controls) button.setAttribute("aria-controls", controls);
+  }
+
   /**
    * The observer and a `pano:load` event can both ask for the same element, and
    * `build` awaits the library — so a `_panoViewer` check alone leaves a window
@@ -965,6 +1007,22 @@ const {
                   },
                 ]
               : []),
+            // Sits with quality rather than in the top bar: both are things you
+            // do *to* the panorama you are looking at, and the top-left corner
+            // is for leaving it.
+            ...(el.dataset.peaks === "true"
+              ? [
+                  {
+                    id: PEAKS_BUTTON_ID,
+                    content: PEAKS_ICON,
+                    className: "pano-peaks",
+                    onClick: () =>
+                      document.dispatchEvent(
+                        new CustomEvent("pano:peaks-toggle", { detail: { target: `#${el.id}` } }),
+                      ),
+                  },
+                ]
+              : []),
             "gyroscope",
             "fullscreen",
           ],
@@ -1005,6 +1063,9 @@ const {
 
     // Nothing to cycle through yet — `pano:meta` fills the list and shows it.
     if (quality) paintQualityButton(el, viewer);
+
+    // Same for summits: hidden until the page has coordinates to justify it.
+    if (el.dataset.peaks === "true") paintPeaksButton(el, viewer, false, false);
 
     /*
       Reveal the stage on the first texture rather than only on `ready`.
@@ -1187,6 +1248,25 @@ const {
         scale: { zoom: [0.9, 1.1] },
       })),
     );
+  });
+
+  /** The other half of `pano:peaks-toggle`: the page answering about its panel. */
+  document.addEventListener("pano:peaks-button", async (event: Event) => {
+    const { target, available, active, controls } = (event as CustomEvent).detail as {
+      target: string;
+      available: boolean;
+      active?: boolean;
+      controls?: string;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    // Same reason as `pano:meta`: the archive usually answers while the viewer
+    // is still constructing, so await the boot rather than dropping the state.
+    const viewer = (await el._panoBoot) ?? el._panoViewer;
+    if (!viewer) return;
+
+    paintPeaksButton(el, viewer, available, active ?? false, controls);
   });
 
   // Let other scripts (the gallery's lightbox) drive a viewer directly.
