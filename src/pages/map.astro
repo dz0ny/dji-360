@@ -713,6 +713,10 @@ const schema: WithContext<CollectionPage> = {
       terrain: { source: "terrain", exaggeration: 1 },
     };
 
+    // Tilted from the first frame — a 3D map that opens flat looks broken — but
+    // not so far that a wide `fitBounds` stacks every pin against the horizon.
+    const PITCH = 50;
+
     const bounds = new maplibregl.LngLatBounds();
     for (const site of sites) bounds.extend([site.lon, site.lat]);
 
@@ -721,8 +725,7 @@ const schema: WithContext<CollectionPage> = {
       style,
       center: bounds.getCenter(),
       zoom: 12,
-      // Tilted from the first frame: a 3D map that opens flat looks broken.
-      pitch: 60,
+      pitch: PITCH,
       maxPitch: 85,
       // One finger pans: the map is what this page is, unlike the spheres
       // embedded in a scrolling gallery. The wheel is the one gesture held
@@ -800,19 +803,36 @@ const schema: WithContext<CollectionPage> = {
       map.resize();
       // A single site has zero-area bounds, which `fitBounds` cannot solve for.
       if (sites.length === 1) {
-        map.jumpTo({ center: bounds.getCenter(), zoom: 14, pitch: 60 });
+        map.jumpTo({ center: bounds.getCenter(), zoom: 14, pitch: PITCH });
       } else {
-        map.fitBounds(bounds, { padding: 56, maxZoom: 15, pitch: 60, duration: 0 });
+        map.fitBounds(bounds, { padding: 56, maxZoom: 15, pitch: PITCH, duration: 0 });
       }
       renderReadout(map);
     };
 
-    map.once("load", () => {
-      frame();
+    /*
+      The veil lifts as soon as the basemap has tiles for the current window,
+      not on `load`. `load` — and `idle` with it — waits for every source to
+      settle, and with terrain switched on the DEM keeps the map dirty
+      indefinitely: on a real archive it never fired at all, leaving the veil
+      sitting over a map that had been drawn for half a minute.
+    */
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return;
+      revealed = true;
       veilEl?.classList.add("opacity-0");
-    });
+    };
 
-    // And again after layout settles, in case the grid or the fonts moved anything.
+    map.on("sourcedata", (event) => {
+      if (event.sourceId === "osm" && event.isSourceLoaded) reveal();
+    });
+    // Should the raster never report in, the map is still more useful visible
+    // than hidden behind a box that says it is loading.
+    setTimeout(reveal, 5000);
+
+    // Frame it immediately too, so the very first tiles are already fetched for
+    // the right window rather than for wherever the map happened to start.
     requestAnimationFrame(frame);
   }
 

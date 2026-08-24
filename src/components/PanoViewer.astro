@@ -1089,6 +1089,15 @@ const {
     viewer.addEventListener("panorama-loaded", reveal);
 
     /*
+      With nothing slotted into the poster there is no fallback to reveal —
+      holding the stage back only hides Photo Sphere Viewer's own loader and
+      leaves the reader staring at black while a texture downloads. Show it as
+      soon as there is a viewer to show. Pages that do pass a poster (the
+      gallery hero) keep the fade, which is the whole reason it exists.
+    */
+    if (!poster || poster.children.length === 0) reveal();
+
+    /*
       A ~1 MB texture failing once is the common case — a phone changing
       networks mid-load, a cold Worker, a dropped connection — and until now the
       only evidence of it was a black rectangle that never resolved. Retry once,
@@ -1278,9 +1287,31 @@ const {
     };
     const el = document.querySelector<PanoElement>(target);
     if (!el) return;
+
+    /*
+      Asking for the panorama already on screen is not a no-op — `setPanorama`
+      cancels whatever texture is in flight and starts again, and cancelling is
+      not an error, so nothing is emitted and nothing recovers. The stage would
+      sit at zero opacity forever: a black page.
+
+      That is exactly what /view/ used to do. It fires `pano:load` immediately
+      from the URL so the sphere starts downloading, then fires it a second time
+      with the same URL once the archive listing lands. Whenever the ~1 MB
+      texture was still arriving at that moment, the second call killed the
+      first — which is why a cold load could hang while the same link opened
+      instantly from the gallery, where the image was already in cache.
+    */
+    const changed = el.dataset.src !== src;
     el.dataset.src = src;
     if (caption !== undefined) el.dataset.caption = caption;
+
     if (el._panoViewer) {
+      if (!changed) {
+        // Same photo. The caption may still have arrived late — that is the
+        // one thing a repeat call legitimately carries.
+        if (caption !== undefined) el._panoViewer.setOption("caption", caption);
+        return;
+      }
       // A different photo: last one's textures and summits belong to it, not this.
       el._panoResolutions = [];
       el._panoResolutionIndex = 0;
