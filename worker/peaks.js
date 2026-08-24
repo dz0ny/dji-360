@@ -104,7 +104,7 @@ const DEG = Math.PI / 180;
 const R = 6371008.8;
 
 /** Great-circle distance in metres. */
-function haversine(lat1, lon1, lat2, lon2) {
+export function haversine(lat1, lon1, lat2, lon2) {
 	const dLat = (lat2 - lat1) * DEG;
 	const dLon = (lon2 - lon1) * DEG;
 	const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * DEG) * Math.cos(lat2 * DEG) * Math.sin(dLon / 2) ** 2;
@@ -134,7 +134,7 @@ function loadManifest(env) {
  * any part of its horizon) falls outside the baked box — in which case the
  * caller goes to Overpass rather than serving a horizon with a hole in it.
  */
-async function bakedPeaks(env, lat, lon) {
+export async function bakedPeaks(env, lat, lon) {
 	const manifest = await loadManifest(env);
 	if (!manifest?.cells?.length) return null;
 

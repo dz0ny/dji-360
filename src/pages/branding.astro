@@ -4,18 +4,18 @@ import Layout from "@/layouts/Layout.astro";
 import samplePano from "@/assets/sample-pano.jpg";
 
 /*
-  Style preview — all three directions realized against the real panorama, so
-  the choice is made from pixels rather than prose. Excluded from nav and
-  noindexed; once a direction is locked this page stays on as the living style
-  guide for whatever ships.
+  Style preview — both directions realized against the real panorama, side by
+  side. Excluded from nav and noindexed; it stays on as the living style guide.
 
-  Each direction is a `[data-direction]` subtree, which re-declares the same
-  token set from `src/index.css`. Nothing here is bespoke CSS — if a swatch
-  looks wrong, the token is wrong.
+  The site has no theme switch: the reader's OS picks Paper Sky in light mode
+  and Dark Room in dark. That makes this page the only way to see both at once,
+  which is exactly what the `[data-direction]` subtrees below are for — each
+  re-declares one token set from `src/index.css`. Nothing here is bespoke CSS;
+  if a swatch looks wrong, the token is wrong.
 */
 
 type Direction = {
-	id: "dark-room" | "flight-log" | "paper-sky";
+	id: "dark-room" | "paper-sky";
 	name: string;
 	concept: string;
 	language: string;
@@ -35,16 +35,6 @@ const DIRECTIONS: Direction[] = [
 		scheme: "Triadic (one leg held in reserve) · cool blue-slate near-black",
 		fonts: "Bricolage Grotesque 800 / Public Sans 300–700 / JetBrains Mono",
 		signature: "Split-stage hero — live sphere behind a bottom-left title and a monospace stat rail",
-	},
-	{
-		id: "flight-log",
-		name: "Flight Log",
-		concept: "The panorama as telemetry: amber instrument glow over a warm-black cockpit.",
-		language: "Technology + Brutalist edge",
-		dials: "VARIANCE 7 · MOTION 4 · DENSITY 6",
-		scheme: "Triadic · warm-black base, amber primary, sky-blue counterweight",
-		fonts: "Bricolage Grotesque 800 / JetBrains Mono 400–700 throughout",
-		signature: "Hard-cornered data slab — everything reads as a readout, nothing is rounded",
 	},
 	{
 		id: "paper-sky",
@@ -68,16 +58,18 @@ const SWATCHES = [
 ];
 ---
 
-<Layout title="Style preview" description="Three design directions for the archive." noindex>
+<Layout title="Style preview" description="The two design directions the archive ships." noindex>
   <section class="mx-auto max-w-3xl px-[var(--spacing-gutter)] pt-10">
     <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary">Style preview</p>
     <h1 class="mt-2 font-display text-[clamp(1.75rem,6vw,3rem)] font-extrabold leading-[1.02] tracking-[-0.03em]">
-      Three directions, one archive
+      Two directions, one archive
     </h1>
     <p class="mt-3 max-w-prose text-sm leading-relaxed text-muted-foreground">
-      Same panorama, same components, three complete token sets. Pick one and the rest of the site is built on it —
-      the winning direction becomes <code class="font-mono text-xs">:root</code> and this page stays as the style guide.
-      The site currently ships <strong class="font-semibold text-foreground">Dark Room</strong>.
+      Same panorama, same components, two complete token sets. The site ships both and never asks which you want:
+      <strong class="font-semibold text-foreground">Paper Sky</strong> in light mode,
+      <strong class="font-semibold text-foreground">Dark Room</strong> in dark, following
+      <code class="font-mono text-xs">prefers-color-scheme</code>. This page pins each one so you can see the other
+      half without changing your system settings.
     </p>
   </section>
 

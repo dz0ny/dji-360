@@ -128,17 +128,135 @@
 }
 
 /*
-  Three design directions live side by side so `/branding/` can show all of
-  them at once. `data-direction` on <html> picks one; "dark-room" is the
-  :root default. Palettes are OKLCH-derived and WCAG-checked — see
-  site-specification.md for the scheme behind each.
+  Two design directions, and the reader's own operating system chooses between
+  them: Paper Sky in light mode, Dark Room in dark. There is no in-page switch —
+  the OS setting IS the switch, so the archive matches whatever else is on
+  screen when someone opens it.
+
+  `data-direction` still overrides on any subtree, which is how `/branding/`
+  shows both at once regardless of the current setting. Palettes are
+  OKLCH-derived and WCAG-checked — see site-specification.md for the scheme
+  behind each.
+
+  Each direction is a whole identity rather than a recolour: they keep their
+  own typefaces, density, and corner radius, as designed.
 */
 
 @layer base {
+  /* ── Paper Sky ──────────────────────────────────────────────────────────
+     Near-white cool paper (hue 232) with one cobalt accent. Every other
+     colour on the page comes from the photographs.
+
+     Also the no-preference default — a browser that reports nothing gets the
+     half that reads on any screen. */
+  :root,
+  [data-direction='paper-sky'] {
+    --background: 201.7 47.1% 98.0%;
+    --foreground: 201.2 19.7% 12.1%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 201.2 19.7% 12.1%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 201.2 19.7% 12.1%;
+
+    --muted: 201.7 23.6% 94.1%;
+    --muted-foreground: 201.5 6.9% 41.0%;
+
+    --border: 201.6 14.1% 86.9%;
+    --input: 201.6 14.1% 86.9%;
+
+    --primary: 201.2 20.0% 13.9%;
+    --primary-foreground: 201.7 35.4% 97.3%;
+
+    --secondary: 201.7 23.6% 94.1%;
+    --secondary-foreground: 201.2 20.0% 13.9%;
+
+    --accent: 201.6 30.2% 90.8%;
+    --accent-foreground: 201.2 20.0% 13.9%;
+
+    --brand-primary: 201.2 20.0% 13.9%;
+    --brand-accent: 202.3 99.9% 32.4%;
+    --brand-accent-foreground: 201.7 53.0% 98.7%;
+
+    --destructive: 355.0 79.0% 42.4%;
+    --destructive-foreground: 201.7 53.0% 98.7%;
+
+    --ring: 202.3 99.9% 32.4%;
+
+    --type-display: var(--font-fraunces), Georgia, serif;
+    --type-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+    --type-meta: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+
+    /* DENSITY 2 — gallery */
+    --density-section: 8rem;
+    --density-gutter: 1.5rem;
+
+    --radius: 0.25rem;
+    --shadow-1: 0 1px 2px hsl(201 20% 20% / 0.06);
+    --shadow-2: 0 10px 30px hsl(201 20% 20% / 0.08);
+    --shadow-3: 0 24px 60px hsl(201 20% 20% / 0.12);
+  }
+
   /* ── Dark Room ──────────────────────────────────────────────────────────
      Cool blue-slate near-black (hue 250), triadic 250/10/130 with the 130
-     leg held in reserve. Sky-cyan is the single bright note. */
-  :root,
+     leg held in reserve. Sky-cyan is the single bright note.
+
+     Declared twice on purpose: CSS cannot share one declaration block between
+     a media query and a plain selector, and routing every token through a
+     second layer of `var()` indirection would cost more lines than the copy
+     does. Edit both. */
+  @media (prefers-color-scheme: dark) {
+    /* `:not()` so a subtree pinned to Paper Sky stays pinned. */
+    :root:not([data-direction='paper-sky']) {
+      --background: 210.8 32.8% 6.3%;
+      --foreground: 211.2 29.0% 93.8%;
+
+      --card: 210.8 23.4% 10.8%;
+      --card-foreground: 211.2 29.0% 93.8%;
+
+      --popover: 210.9 20.4% 12.6%;
+      --popover-foreground: 211.2 29.0% 93.8%;
+
+      --muted: 210.9 15.0% 15.4%;
+      --muted-foreground: 211.1 7.2% 64.9%;
+
+      --border: 210.9 14.2% 19.3%;
+      --input: 210.9 14.2% 19.3%;
+
+      --primary: 184.4 99.7% 45.4%;
+      --primary-foreground: 210.6 41.8% 7.2%;
+
+      --secondary: 210.8 21.4% 15.5%;
+      --secondary-foreground: 211.2 29.0% 93.8%;
+
+      --accent: 210.8 20.3% 18.5%;
+      --accent-foreground: 211.2 27.2% 95.0%;
+
+      --brand-primary: 184.4 99.7% 45.4%;
+      --brand-accent: 348.8 75.1% 68.5%;
+      --brand-accent-foreground: 210.7 46.7% 6.4%;
+
+      --destructive: 359.5 63.7% 52.9%;
+      --destructive-foreground: 211.2 30.4% 96.3%;
+
+      --ring: 184.4 99.7% 45.4%;
+
+      --type-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+      --type-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+      --type-meta: var(--font-jetbrains), ui-monospace, monospace;
+
+      /* DENSITY 3 — airy */
+      --density-section: 6rem;
+      --density-gutter: 1.25rem;
+
+      --radius: 0.875rem;
+      --shadow-1: 0 1px 2px hsl(210 40% 2% / 0.6);
+      --shadow-2: 0 12px 40px hsl(210 40% 2% / 0.55);
+      --shadow-3: 0 28px 80px hsl(210 40% 2% / 0.7);
+    }
+  }
+
   [data-direction='dark-room'] {
     --background: 210.8 32.8% 6.3%;
     --foreground: 211.2 29.0% 93.8%;
@@ -187,106 +305,65 @@
     --shadow-3: 0 28px 80px hsl(210 40% 2% / 0.7);
   }
 
-  /* ── Flight Log ─────────────────────────────────────────────────────────
-     Warm-black (hue 70), complementary 70/250. Instrument amber reads out;
-     the cool complement is reserved for links and live status. */
-  [data-direction='flight-log'] {
-    --background: 31.4 29.8% 4.9%;
-    --foreground: 31.3 23.4% 90.4%;
+  /*
+    Re-bind Tailwind's theme tokens on any pinned subtree.
 
-    --card: 31.6 20.6% 9.1%;
-    --card-foreground: 31.3 23.4% 90.4%;
+    `@theme` declares `--color-background: hsl(var(--background))` on `:root`,
+    and a custom property's `var()` is substituted where the property is
+    *declared*, not where it is used. So `--color-background` is computed once,
+    at the root, against the root's palette — and every descendant inherits that
+    finished colour. Setting `--background` deeper down changes nothing on its
+    own; the mapping has to be recomputed at the same place.
 
-    --popover: 31.5 17.6% 10.9%;
-    --popover-foreground: 31.3 23.4% 90.4%;
+    Only `[data-direction]` subtrees need this. The OS switch flips `:root`
+    itself, where the original mapping already lives.
+  */
+  [data-direction] {
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
 
-    --muted: 31.5 14.4% 13.7%;
-    --muted-foreground: 31.3 8.2% 63.9%;
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
 
-    --border: 31.5 13.7% 17.4%;
-    --input: 31.5 13.7% 17.4%;
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
 
-    --primary: 40.7 95.2% 57.2%;
-    --primary-foreground: 31.2 55.0% 5.3%;
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
 
-    --secondary: 31.7 22.2% 13.4%;
-    --secondary-foreground: 31.3 23.4% 90.4%;
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
 
-    --accent: 31.7 21.0% 16.2%;
-    --accent-foreground: 31.2 26.2% 93.1%;
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
 
-    --brand-primary: 40.7 95.2% 57.2%;
-    --brand-accent: 209.7 92.3% 66.2%;
-    --brand-accent-foreground: 30.0 60.3% 4.6%;
+    --color-popover: hsl(var(--popover));
+    --color-popover-foreground: hsl(var(--popover-foreground));
 
-    --destructive: 359.5 63.7% 52.9%;
-    --destructive-foreground: 31.2 27.3% 95.8%;
+    --color-card: hsl(var(--card));
+    --color-card-foreground: hsl(var(--card-foreground));
 
-    --ring: 40.7 95.2% 57.2%;
+    --color-brand-primary: hsl(var(--brand-primary));
+    --color-brand-accent: hsl(var(--brand-accent));
+    --color-brand-accent-foreground: hsl(var(--brand-accent-foreground));
 
-    --type-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
-    --type-body: var(--font-jetbrains), ui-monospace, monospace;
-    --type-meta: var(--font-jetbrains), ui-monospace, monospace;
+    --font-display: var(--type-display);
+    --font-sans: var(--type-body);
+    --font-mono: var(--type-meta);
 
-    /* DENSITY 6 — packed */
-    --density-section: 3.5rem;
-    --density-gutter: 0.75rem;
+    --spacing-section: var(--density-section);
+    --spacing-gutter: var(--density-gutter);
 
-    --radius: 0.125rem;
-    --shadow-1: 0 1px 0 hsl(31 30% 2% / 0.8);
-    --shadow-2: 0 6px 20px hsl(31 30% 2% / 0.6);
-    --shadow-3: 0 16px 44px hsl(31 30% 2% / 0.75);
-  }
+    --shadow-soft: var(--shadow-1);
+    --shadow-medium: var(--shadow-2);
+    --shadow-strong: var(--shadow-3);
 
-  /* ── Paper Sky ──────────────────────────────────────────────────────────
-     Near-white cool paper (hue 232) with one cobalt accent. Every other
-     colour on the page comes from the photographs. */
-  [data-direction='paper-sky'] {
-    --background: 201.7 47.1% 98.0%;
-    --foreground: 201.2 19.7% 12.1%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 201.2 19.7% 12.1%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 201.2 19.7% 12.1%;
-
-    --muted: 201.7 23.6% 94.1%;
-    --muted-foreground: 201.5 6.9% 41.0%;
-
-    --border: 201.6 14.1% 86.9%;
-    --input: 201.6 14.1% 86.9%;
-
-    --primary: 201.2 20.0% 13.9%;
-    --primary-foreground: 201.7 35.4% 97.3%;
-
-    --secondary: 201.7 23.6% 94.1%;
-    --secondary-foreground: 201.2 20.0% 13.9%;
-
-    --accent: 201.6 30.2% 90.8%;
-    --accent-foreground: 201.2 20.0% 13.9%;
-
-    --brand-primary: 201.2 20.0% 13.9%;
-    --brand-accent: 202.3 99.9% 32.4%;
-    --brand-accent-foreground: 201.7 53.0% 98.7%;
-
-    --destructive: 355.0 79.0% 42.4%;
-    --destructive-foreground: 201.7 53.0% 98.7%;
-
-    --ring: 202.3 99.9% 32.4%;
-
-    --type-display: var(--font-fraunces), Georgia, serif;
-    --type-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
-    --type-meta: var(--font-public), ui-sans-serif, system-ui, sans-serif;
-
-    /* DENSITY 2 — gallery */
-    --density-section: 8rem;
-    --density-gutter: 1.5rem;
-
-    --radius: 0.25rem;
-    --shadow-1: 0 1px 2px hsl(201 20% 20% / 0.06);
-    --shadow-2: 0 10px 30px hsl(201 20% 20% / 0.08);
-    --shadow-3: 0 24px 60px hsl(201 20% 20% / 0.12);
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
   }
 }
 

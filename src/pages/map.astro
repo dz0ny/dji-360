@@ -1,0 +1,647 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { SITE_NAME, SITE_URL } from "@/config";
+import type { WithContext, CollectionPage } from "schema-dts";
+
+/*
+  Where every panorama was flown.
+
+  The archive listing already carries lat/lon for anything the camera geotagged,
+  so this page is the same `/~/api/photos` payload read a second way. Leaflet is
+  imported by the page script rather than the layout — it is ~150 kB and only
+  this route needs it.
+
+  Tiles come straight from openstreetmap.org, the same host `staticmap.ts`
+  already uses for the in-viewer minimap: no key, no proxy, and the CSP's
+  `img-src https:` already allows it.
+
+  DESIGN — the map is dressed as the camera's own display rather than as a
+  widget: a live telemetry readout of the centre in the bottom-left, and pins
+  that carry a heading tick when the camera recorded which way the frame faced.
+  Both carry real information. Corner framing marks were tried and cut — they
+  read as decoration and collided with the zoom control.
+*/
+
+import "leaflet/dist/leaflet.css";
+
+const DESCRIPTION = "Every geotagged 360° panorama in the archive, plotted on one map.";
+
+const schema: WithContext<CollectionPage> = {
+	"@context": "https://schema.org",
+	"@type": "CollectionPage",
+	name: `Map | ${SITE_NAME}`,
+	description: DESCRIPTION,
+	url: `${SITE_URL}/map/`,
+};
+---
+
+<Layout title="Map" description={DESCRIPTION} schema={schema}>
+  <section class="mx-auto max-w-[1600px] px-[var(--spacing-gutter)] pt-10" aria-labelledby="map-title">
+    <div class="mb-5 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b border-border/70 pb-4">
+      <div>
+        <p class="font-mono text-[0.625rem] uppercase tracking-[0.22em] text-brand-primary animate-rise">
+          Flight map
+        </p>
+        <h1
+          id="map-title"
+          class="mt-2 font-display text-[clamp(1.75rem,5vw,3rem)] font-extrabold leading-[0.95] tracking-[-0.03em] animate-rise [animation-delay:100ms]"
+        >
+          Where these were shot
+        </h1>
+      </div>
+
+      <dl
+        class="grid grid-cols-3 gap-x-6 gap-y-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] animate-rise [animation-delay:200ms] sm:grid-cols-[auto_auto] sm:justify-end sm:gap-x-4 sm:text-right"
+      >
+        <div class="sm:contents">
+          <dt class="text-muted-foreground">Pinned</dt>
+          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-pinned>—</dd>
+        </div>
+        <div class="sm:contents">
+          <dt class="text-muted-foreground">Sites</dt>
+          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-sites>—</dd>
+        </div>
+        <div class="sm:contents">
+          <dt class="text-muted-foreground">Unlocated</dt>
+          <dd class="whitespace-nowrap text-base font-bold tracking-normal text-foreground sm:text-sm" data-stat-missing>—</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-[1600px] px-[var(--spacing-gutter)] pb-[var(--spacing-section)]">
+    <div class="relative overflow-hidden rounded-lg border border-border/70 bg-muted shadow-soft">
+      <div
+        id="flight-map"
+        class="h-[62dvh] min-h-[380px] w-full lg:h-[calc(100dvh-15rem)] lg:min-h-[540px]"
+        role="application"
+        aria-label="Map of panorama locations"
+      ></div>
+
+      {/* Telemetry. Whatever the map is centred on, in the camera's own units. */}
+      <p class="map-readout" data-map-readout aria-hidden="true"></p>
+
+      {/* Covers the map until Leaflet paints, so tiles never fade in over a bare box. */}
+      <div
+        class="pointer-events-none absolute inset-0 z-[600] grid place-items-center bg-muted font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-500"
+        data-map-veil
+      >
+        Loading the map
+      </div>
+    </div>
+
+    <p class="mt-3 hidden text-sm text-destructive" data-map-error role="alert"></p>
+  </section>
+</Layout>
+
+<style>
+  /* Bottom-left so it never collides with Leaflet's attribution, which is
+     pinned bottom-right and must stay legible. */
+  .map-readout {
+    position: absolute;
+    left: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 500;
+    pointer-events: none;
+    padding: 0.3125rem 0.5rem;
+    border: 1px solid hsl(var(--brand-primary) / 0.3);
+    border-radius: var(--radius-sm);
+    background: hsl(var(--background) / 0.78);
+    backdrop-filter: blur(8px);
+    font-family: var(--type-meta);
+    font-size: 0.5625rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+    /* Empty until the map reports a centre — an empty box would just be a smudge. */
+    opacity: 0;
+    transition: opacity 400ms ease;
+  }
+
+  .map-readout:not(:empty) {
+    opacity: 1;
+  }
+
+  .map-readout b {
+    font-weight: 700;
+    color: hsl(var(--brand-primary));
+  }
+</style>
+
+<style is:global>
+  /*
+    Leaflet stamps its own class names on the elements it creates, so none of
+    this can be scoped — Astro's scoping attribute never lands on them.
+    Everything below is namespaced under `#flight-map` or a `pano-` class.
+  */
+
+  /* OSM ships one bright raster set. In Dark Room it would glow like a lightbox
+     in the middle of the page, so the tiles — and only the tiles — are inverted
+     back into the palette. Paper Sky leaves them as drawn.
+
+     Declared twice for the same reason the palettes are: a media query and a
+     plain selector cannot share one block. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-direction='paper-sky']) #flight-map .leaflet-tile {
+      filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+    }
+  }
+
+  [data-direction='dark-room'] #flight-map .leaflet-tile {
+    filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+  }
+
+  #flight-map {
+    background: hsl(var(--muted));
+    /* The map owns its gestures; the page must never scroll under a drag. */
+    touch-action: none;
+    font-family: var(--type-body);
+  }
+
+  #flight-map .leaflet-control-attribution {
+    background: hsl(var(--background) / 0.8);
+    color: hsl(var(--muted-foreground));
+    font-family: var(--type-meta);
+    font-size: 0.5625rem;
+  }
+
+  #flight-map .leaflet-control-attribution a {
+    color: hsl(var(--brand-primary));
+  }
+
+  #flight-map .leaflet-control-zoom {
+    border: 0;
+  }
+
+  #flight-map .leaflet-control-zoom a {
+    background: hsl(var(--background) / 0.85);
+    color: hsl(var(--foreground));
+    border-color: hsl(var(--border));
+    backdrop-filter: blur(8px);
+  }
+
+  #flight-map .leaflet-control-zoom a:hover {
+    background: hsl(var(--accent));
+    color: hsl(var(--brand-primary));
+  }
+
+  /* ── Pins ──────────────────────────────────────────────────────────────
+     A divIcon rather than Leaflet's default PNG pin: the bundled image paths
+     break under Vite, and a CSS dot can take the brand colour, a count, and a
+     heading tick. */
+  .pano-pin {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+    background: hsl(var(--brand-primary));
+    color: hsl(var(--brand-accent-foreground));
+    box-shadow: 0 2px 12px hsl(0 0% 0% / 0.5);
+    font-family: var(--type-meta);
+    font-size: 0.625rem;
+    font-weight: 700;
+    line-height: 1;
+    /* MOTION: pins drop in one after another once the map has framed them.
+       `backwards` keeps the start state during the delay and hands the element
+       back to its own transform afterwards, so hover still scales cleanly. */
+    animation: pin-drop 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--pin-delay, 0ms);
+    transition:
+      transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      background-color 180ms ease;
+  }
+
+  @keyframes pin-drop {
+    from {
+      opacity: 0;
+      transform: translateY(-0.75rem) scale(0.4);
+    }
+  }
+
+  /*
+    Which way the centre of the frame faces, when the camera recorded it — the
+    same heading the peak labels are placed against. Sites without one get a
+    plain dot rather than a guessed direction.
+  */
+  .pano-pin__tick {
+    position: absolute;
+    inset: -0.3125rem;
+    transform: rotate(var(--heading, 0deg));
+  }
+
+  .pano-pin__tick::before {
+    content: '';
+    position: absolute;
+    top: -0.0625rem;
+    left: 50%;
+    width: 0;
+    height: 0;
+    margin-left: -0.25rem;
+    border-left: 0.25rem solid transparent;
+    border-right: 0.25rem solid transparent;
+    border-bottom: 0.375rem solid hsl(var(--brand-primary));
+  }
+
+  .leaflet-marker-icon:focus-visible .pano-pin,
+  .pano-pin:hover,
+  .pano-pin[data-active] {
+    transform: scale(1.25);
+    background: hsl(var(--brand-accent));
+  }
+
+  .pano-pin[data-active] .pano-pin__tick::before,
+  .pano-pin:hover .pano-pin__tick::before {
+    border-bottom-color: hsl(var(--brand-accent));
+  }
+
+  /* ── Popup ─────────────────────────────────────────────────────────────
+     Leaflet's default is a white bubble with a white tail; both are repainted
+     so the popup belongs to whichever direction is active. */
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip {
+    background: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-3);
+  }
+
+  .leaflet-popup-content-wrapper {
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid hsl(var(--border));
+  }
+
+  .leaflet-popup-content {
+    margin: 0;
+    width: 15rem !important;
+  }
+
+  /* The bubble opens on a photograph, and a bright sky swallows a bare glyph —
+     so the close control carries its own disc. */
+  .leaflet-container a.leaflet-popup-close-button {
+    top: 0.375rem;
+    right: 0.375rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border-radius: 9999px;
+    background: hsl(var(--background) / 0.65);
+    backdrop-filter: blur(8px);
+    color: hsl(var(--foreground) / 0.8);
+    font-size: 1rem;
+    line-height: 1.375rem;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .leaflet-container a.leaflet-popup-close-button:hover {
+    background: hsl(var(--background) / 0.9);
+    color: hsl(var(--brand-primary));
+  }
+
+  .pano-popup__shot {
+    display: block;
+    color: inherit;
+  }
+
+  .pano-popup__shot + .pano-popup__shot {
+    border-top: 1px solid hsl(var(--border));
+  }
+
+  .pano-popup__shot:hover .pano-popup__title {
+    color: hsl(var(--brand-primary));
+  }
+
+  .pano-popup__shot img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1200 / 630;
+    object-fit: cover;
+  }
+
+  .pano-popup__body {
+    display: block;
+    padding: 0.625rem 0.75rem 0.75rem;
+  }
+
+  .pano-popup__title {
+    display: block;
+    font-family: var(--type-display);
+    font-size: 0.875rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: hsl(var(--popover-foreground));
+    transition: color 150ms ease;
+  }
+
+  .pano-popup__meta {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: var(--type-meta);
+    font-size: 0.5625rem;
+    line-height: 1.6;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* More than one panorama from the same take-off point: the bubble scrolls
+     rather than growing past the map. */
+  .pano-popup--stack {
+    max-height: 17rem;
+    overflow-y: auto;
+  }
+
+  .pano-popup--stack .pano-popup__shot img {
+    aspect-ratio: 1200 / 360;
+  }
+
+</style>
+
+<script>
+  import L from "leaflet";
+  import {
+    displayTitle,
+    escapeHtml,
+    fetchPhotos,
+    formatCoords,
+    formatDate,
+    photoDate,
+    viewUrl,
+    type Photo,
+  } from "@/lib/photos";
+
+  /**
+   * One pin per take-off point, not per photo. Repeat flights from the same spot
+   * land within a few metres of each other and would stack into an unclickable
+   * pile; rounding to four decimals (~11 m) merges them into a single pin whose
+   * popup lists the lot.
+   */
+  interface Site {
+    key: string;
+    lat: number;
+    lon: number;
+    photos: Photo[];
+  }
+
+  const errorEl = document.querySelector<HTMLElement>("[data-map-error]");
+  const veilEl = document.querySelector<HTMLElement>("[data-map-veil]");
+  const readoutEl = document.querySelector<HTMLElement>("[data-map-readout]");
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function setStat(selector: string, value: string) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) el.textContent = value;
+  }
+
+  function hasCoords(photo: Photo): boolean {
+    return photo.lat != null && photo.lon != null;
+  }
+
+  /** Metres above sea level where the camera knew it, above take-off otherwise. */
+  function altitudeOf(photo: Photo): number | null {
+    return photo.altitudeAmsl ?? photo.altitude;
+  }
+
+  function groupSites(photos: Photo[]): Site[] {
+    const sites = new Map<string, Site>();
+
+    for (const photo of photos) {
+      if (!hasCoords(photo)) continue;
+      const lat = photo.lat as number;
+      const lon = photo.lon as number;
+      const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+      const existing = sites.get(key);
+      if (existing) {
+        existing.photos.push(photo);
+      } else {
+        sites.set(key, { key, lat, lon, photos: [photo] });
+      }
+    }
+
+    // Newest site first, matching the order the archive itself reads in.
+    return [...sites.values()].sort((a, b) => {
+      const at = photoDate(a.photos[0])?.getTime() ?? 0;
+      const bt = photoDate(b.photos[0])?.getTime() ?? 0;
+      return bt - at;
+    });
+  }
+
+  /** A place has no name of its own, so a site borrows its newest frame's. */
+  function siteLabel(site: Site): string {
+    return displayTitle(site.photos[0]);
+  }
+
+  function popupHtml(site: Site): string {
+    const stack = site.photos.length > 1;
+
+    const shots = site.photos
+      .map((photo) => {
+        const title = escapeHtml(displayTitle(photo));
+        const date = escapeHtml(formatDate(photo));
+        const coords = escapeHtml(formatCoords(photo));
+        const altitude = altitudeOf(photo);
+        const height = altitude == null ? "" : ` · ${Math.round(altitude)} m`;
+
+        return `
+          <a class="pano-popup__shot" href="${viewUrl(photo.id)}">
+            <img
+              src="${photo.cover}"
+              data-fallback="${photo.thumb}"
+              alt="360° panorama — ${title}"
+              width="240"
+              height="126"
+              loading="lazy"
+              decoding="async"
+            />
+            <span class="pano-popup__body">
+              <span class="pano-popup__title">${title}</span>
+              <span class="pano-popup__meta">${date}${height}${stack ? "" : `<br />${coords}`}</span>
+            </span>
+          </a>`;
+      })
+      .join("");
+
+    return `<div class="${stack ? "pano-popup--stack" : ""}">${shots}</div>`;
+  }
+
+  /**
+   * Covers from before the horizon crop existed 404, so each one falls back to
+   * its 2:1 thumb — the same swap the card grid does. If that misses too the
+   * image is removed: a bubble this small cannot afford a dead grey block above
+   * the caption. Popups build their DOM when they open, so this runs once per
+   * popup rather than once per page.
+   */
+  function coverFallback(root: HTMLElement) {
+    for (const img of root.querySelectorAll<HTMLImageElement>("img[data-fallback]")) {
+      img.addEventListener("error", () => {
+        const fallback = img.dataset.fallback;
+        if (fallback) {
+          img.removeAttribute("data-fallback");
+          img.src = fallback;
+        } else {
+          img.remove();
+        }
+      });
+    }
+  }
+
+  function pinIcon(site: Site, index: number) {
+    const count = site.photos.length;
+    // The tick is only honest when a camera actually recorded the heading.
+    const heading = site.photos.find((photo) => photo.heading != null)?.heading;
+    const tick = heading == null ? "" : `<span class="pano-pin__tick" style="--heading:${heading}deg"></span>`;
+    // Stagger the drop-in, but cap it so a long archive is not still landing
+    // pins after a second and a half.
+    const delay = reducedMotion ? 0 : Math.min(index, 12) * 45;
+
+    return L.divIcon({
+      className: "",
+      html: `<span class="pano-pin" style="--pin-delay:${delay}ms" aria-hidden="true">${tick}${count > 1 ? count : ""}</span>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -16],
+    });
+  }
+
+  /** The centre of the map, in the units the camera writes into its own files. */
+  function renderReadout(center: L.LatLng, zoom: number) {
+    if (!readoutEl) return;
+    const ns = center.lat >= 0 ? "N" : "S";
+    const ew = center.lng >= 0 ? "E" : "W";
+    readoutEl.innerHTML =
+      `${Math.abs(center.lat).toFixed(4)}°${ns} ${Math.abs(center.lng).toFixed(4)}°${ew}` +
+      ` <b>Z${zoom}</b>`;
+  }
+
+  async function load() {
+    const container = document.getElementById("flight-map");
+    if (!container) return;
+
+    let photos: Photo[];
+    try {
+      photos = await fetchPhotos();
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = error instanceof Error ? error.message : "Could not load the archive.";
+        errorEl.classList.remove("hidden");
+      }
+      if (veilEl) veilEl.textContent = "Map unavailable";
+      return;
+    }
+
+    const sites = groupSites(photos);
+    const pinned = photos.filter(hasCoords).length;
+
+    setStat("[data-stat-pinned]", String(pinned));
+    setStat("[data-stat-sites]", String(sites.length));
+    setStat("[data-stat-missing]", String(photos.length - pinned));
+
+    if (sites.length === 0) {
+      // The stat row above already says how many are unlocated; the veil only
+      // has to explain why the map stayed empty.
+      if (veilEl) veilEl.textContent = "Nothing carries a GPS tag yet";
+      return;
+    }
+
+    // ── Map ──────────────────────────────────────────────────────────────
+    const map = L.map(container, {
+      // One finger pans: the map is what this page is, unlike the spheres
+      // embedded in a scrolling gallery. The wheel is the one gesture held
+      // back, below, because that one belongs to the page.
+      scrollWheelZoom: false,
+      worldCopyJump: true,
+      zoomControl: true,
+      attributionControl: true,
+    });
+
+    // Ctrl/⌘ + wheel zooms; a bare wheel keeps scrolling the page.
+    container.addEventListener(
+      "wheel",
+      (event) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        map.setZoom(map.getZoom() - Math.sign(event.deltaY));
+      },
+      { passive: false },
+    );
+
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+
+    const markers = sites.map((site, index) =>
+      L.marker([site.lat, site.lon], {
+        icon: pinIcon(site, index),
+        title: siteLabel(site),
+        alt: siteLabel(site),
+        riseOnHover: true,
+      })
+        .bindPopup(popupHtml(site), {
+          maxWidth: 260,
+          minWidth: 240,
+          closeButton: true,
+          autoPanPadding: [24, 24],
+        })
+        .addTo(map),
+    );
+
+    map.on("popupopen", (event) => {
+      const node = event.popup.getElement();
+      if (node) coverFallback(node);
+    });
+
+    map.on("move zoom", () => renderReadout(map.getCenter(), map.getZoom()));
+
+    const bounds = L.latLngBounds(sites.map((site) => [site.lat, site.lon] as [number, number]));
+
+    /*
+      `fitBounds` solves for the container's pixel size, and Leaflet measured
+      that the moment `L.map()` ran — before the browser had laid the grid out.
+      A stale size makes it fall back to the whole world, so re-measure on the
+      next frame and only then frame the pins.
+    */
+    const frame = () => {
+      map.invalidateSize(false);
+      // A single site has zero-area bounds, which `fitBounds` cannot solve for.
+      if (sites.length === 1) {
+        map.setView(bounds.getCenter(), 14);
+      } else {
+        map.fitBounds(bounds, { padding: [56, 56], maxZoom: 15 });
+      }
+      renderReadout(map.getCenter(), map.getZoom());
+    };
+
+    // Fit once now so the first paint is already in the right place, and again
+    // after layout settles in case the grid or the fonts moved anything.
+    frame();
+    requestAnimationFrame(frame);
+
+    veilEl?.classList.add("opacity-0");
+
+    /*
+      An open popup keeps its own pin lit. Leaflet raises the marker a popup is
+      attached to but does not mark it, and with pins packed this close the
+      reader otherwise loses track of which one they opened.
+    */
+    const setActive = (index: number | null) => {
+      markers.forEach((marker, i) => {
+        const pin = marker.getElement()?.querySelector<HTMLElement>(".pano-pin");
+        pin?.toggleAttribute("data-active", i === index);
+      });
+    };
+
+    markers.forEach((marker, index) => {
+      marker.on("popupopen", () => setActive(index));
+      marker.on("popupclose", () => setActive(null));
+    });
+  }
+
+  void load();
+</script>

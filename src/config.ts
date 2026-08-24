@@ -32,6 +32,8 @@ export const API = {
 	whoami: "/~/api/whoami",
 	/** `/~/api/peaks/<id>` — named summits around one panorama, cached in R2. */
 	peaks: "/~/api/peaks",
+	/** `/~/api/place?lat=&lon=` — what to call a spot. Access-gated, cached in R2. */
+	place: "/~/api/place",
 	/** `/~/api/upload/<id>/<thumb|cover|preview|large|original>/` */
 	upload: "/~/api/upload",
 	img: "/~/img",

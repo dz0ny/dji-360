@@ -15,6 +15,7 @@
 
 import { verifyAccess } from './access.js';
 import { handlePeaks } from './peaks.js';
+import { handlePlace } from './place.js';
 
 const KINDS = {
 	thumb: { prefix: 'thumbs/', maxBytes: 2 * 1024 * 1024 },
@@ -239,6 +240,10 @@ export async function handleApi(request, env) {
 	}
 
 	if (!auth.ok) return fail(403, auth.reason);
+
+	if (resource === 'place' && rest.length === 0 && method === 'GET') {
+		return handlePlace(request, env);
+	}
 
 	if (resource === 'upload' && rest.length === 2 && method === 'PUT') {
 		const [id, kind] = rest;

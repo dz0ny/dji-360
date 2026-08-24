@@ -71,6 +71,7 @@ import Layout from "@/layouts/Layout.astro";
 <script>
   import { displayTitle, escapeHtml, fetchPhotos, formatBytes, formatDate, viewUrl, type Photo } from "@/lib/photos";
   import { deletePanorama, renamePanorama, uploadPanorama, whoami, type UploadStage } from "@/lib/upload";
+  import { lookupPlace } from "@/lib/place";
 
   const gate = document.querySelector<HTMLElement>("[data-gate]");
   const gateReason = document.querySelector<HTMLElement>("[data-gate-reason]");
@@ -106,7 +107,7 @@ import Layout from "@/layouts/Layout.astro";
   function queueRow(file: File): {
     setStage: (stage: UploadStage, ratio: number) => void;
     setError: (message: string) => void;
-    setDone: (id: string, warning: string | null) => void;
+    setDone: (id: string, title: string, warning: string | null) => void;
   } {
     const li = document.createElement("li");
     li.className = "rounded-lg border border-border bg-card p-4";
@@ -138,12 +139,15 @@ import Layout from "@/layouts/Layout.astro";
           stageEl.className = "mt-2 text-xs text-destructive";
         }
       },
-      setDone(id, warning) {
+      setDone(id, title, warning) {
         if (bar) bar.style.width = "100%";
         if (!stageEl) return;
+        // The name is worth showing: it was chosen from the GPS, not typed, so
+        // this is the first chance anyone has to disagree with it.
+        const named = title ? `Named <strong class="font-semibold text-foreground">${escapeHtml(title)}</strong> · ` : "";
         stageEl.innerHTML = warning
           ? `<span class="text-brand-accent">${escapeHtml(warning)}</span>`
-          : `Uploaded · <a class="underline underline-offset-4" href="${viewUrl(id)}">view</a>`;
+          : `${named}<a class="underline underline-offset-4" href="${viewUrl(id)}">view</a>`;
         stageEl.className = "mt-2 text-xs text-muted-foreground";
       },
     };
@@ -160,10 +164,10 @@ import Layout from "@/layouts/Layout.astro";
     for (const file of files) {
       const row = queueRow(file);
       try {
-        const { id, warning } = await uploadPanorama(file, {
+        const { id, title, warning } = await uploadPanorama(file, {
           onProgress: ({ stage, ratio }) => row.setStage(stage, ratio),
         });
-        row.setDone(id, warning);
+        row.setDone(id, title, warning);
         uploaded++;
       } catch (error) {
         row.setError(error instanceof Error ? error.message : "Upload failed");
@@ -183,8 +187,14 @@ import Layout from "@/layouts/Layout.astro";
 
   function manageRow(photo: Photo): string {
     const title = escapeHtml(displayTitle(photo));
+    const located = photo.lat != null && photo.lon != null;
     return `
-      <li class="flex items-center gap-3 py-3" data-row="${escapeHtml(photo.id)}">
+      <li
+        class="flex items-center gap-3 py-3"
+        data-row="${escapeHtml(photo.id)}"
+        data-lat="${photo.lat ?? ""}"
+        data-lon="${photo.lon ?? ""}"
+      >
         <a href="${viewUrl(photo.id)}" class="shrink-0">
           <img
             src="${photo.thumb}"
@@ -209,6 +219,14 @@ import Layout from "@/layouts/Layout.astro";
             class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Rename ${title}"
           >Edit</button>
+          <button
+            type="button"
+            data-autoname
+            ${located ? "" : "disabled"}
+            class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+            aria-label="${located ? `Name ${title} after its location` : `${title} has no coordinates to name it from`}"
+            title="${located ? "Name it after its location" : "No coordinates"}"
+          >Geo</button>
           <button
             type="button"
             data-delete
@@ -252,6 +270,40 @@ import Layout from "@/layouts/Layout.astro";
       void renamePanorama(id, next)
         .then(loadManage)
         .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Rename failed"));
+      return;
+    }
+
+    if (target.closest("[data-autoname]")) {
+      const button = target.closest<HTMLButtonElement>("[data-autoname]");
+      const lat = Number(row.dataset.lat);
+      const lon = Number(row.dataset.lon);
+      if (!button || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      // One at a time, and visibly: the lookup is a network round trip and the
+      // button is small enough that a second click is easy to land by accident.
+      button.disabled = true;
+      button.textContent = "…";
+
+      void lookupPlace(lat, lon)
+        .then((place) => {
+          if (!place) {
+            showFatal("Nothing named at those coordinates. Use Edit to name it by hand.");
+            return;
+          }
+          // Confirmed rather than applied: the geocoder picks the nearest named
+          // thing, which is not always the thing the photo is of.
+          if (!window.confirm(`Name this "${place.name}"?\n\n${place.display}`)) return;
+          return renamePanorama(id, place.name).then(loadManage);
+        })
+        .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Could not name it"))
+        .finally(() => {
+          // `loadManage` replaces the row wholesale on success; restore only if
+          // it is still the one on screen.
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = "Geo";
+          }
+        });
       return;
     }
 

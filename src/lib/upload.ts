@@ -16,6 +16,7 @@
 import { API } from "@/config";
 import { buildDerivatives } from "@/lib/derive";
 import { readPanoMetadata } from "@/lib/exif";
+import { lookupPlace } from "@/lib/place";
 
 export type UploadStage = "reading" | "resizing" | "preview" | "large" | "original" | "thumb" | "done";
 
@@ -112,6 +113,8 @@ function put(
 
 export interface UploadResult {
 	id: string;
+	/** The title it went in under — a place name when the GPS resolved to one. */
+	title: string;
 	warning: string | null;
 }
 
@@ -125,6 +128,23 @@ export async function uploadPanorama(
 
 	report("reading", 0);
 	const meta = await readPanoMetadata(file);
+
+	/*
+	 * Name it after where it was flown, unless a title was typed in. A drone
+	 * writes coordinates into every frame and nothing a person would read, so
+	 * without this every upload lands in the archive called by its date.
+	 *
+	 * `lookupPlace` never throws and never blocks for long — a geocoder that is
+	 * down costs the title and nothing else, and an untitled panorama already
+	 * falls back to its capture date everywhere it is shown.
+	 */
+	let resolvedTitle = title.trim();
+	if (!resolvedTitle && meta.lat != null && meta.lon != null) {
+		report("reading", 0.5);
+		const place = await lookupPlace(meta.lat, meta.lon, signal);
+		if (place) resolvedTitle = place.name;
+	}
+
 	report("reading", 1);
 
 	report("resizing", 0);
@@ -163,7 +183,7 @@ export async function uploadPanorama(
 		thumb.blob,
 		{
 			"X-Photo-Meta": toBase64Url({
-				title: title.trim(),
+				title: resolvedTitle,
 				capturedAt: meta.capturedAt ?? "",
 				lat: meta.lat ?? "",
 				lon: meta.lon ?? "",
@@ -196,6 +216,7 @@ export async function uploadPanorama(
 	const ratio = width && height ? width / height : 0;
 	return {
 		id,
+		title: resolvedTitle,
 		warning:
 			ratio && Math.abs(ratio - 2) > 0.02
 				? `${file.name} is ${ratio.toFixed(2)}:1, not the 2:1 an equirectangular panorama needs — it may look stretched.`

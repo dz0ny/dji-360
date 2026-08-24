@@ -11,6 +11,7 @@ via Cloudflare Access — but viewing is open to everyone.
 ## Key Pages
 
 - [Gallery](/) — every panorama, newest first
+- [Map](/map/) — every geotagged panorama plotted on one map, grouped by take-off point
 - [Viewer](/p/<id>/) — a single panorama full-screen, with its own link preview
 
 ## API

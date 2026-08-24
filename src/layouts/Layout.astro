@@ -4,7 +4,6 @@ import "../index.css";
 import { Schema } from "astro-seo-schema";
 import type { Thing, WithContext } from "schema-dts";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SOCIAL_IMAGE } from "@/config";
-import DirectionSwitch from "@/components/DirectionSwitch.astro";
 
 interface Props {
 	title?: string;
@@ -12,8 +11,6 @@ interface Props {
 	noindex?: boolean;
 	socialImageUrl?: string;
 	schema?: WithContext<Thing> | WithContext<Thing>[];
-	/** Which design direction to render. Overridable so /branding/ can show all three. */
-	direction?: "dark-room" | "flight-log" | "paper-sky";
 	/** Chromeless pages (the sphere viewer) hide the header and let the canvas own the screen. */
 	bare?: boolean;
 }
@@ -25,7 +22,6 @@ const {
 	noindex = false,
 	socialImageUrl,
 	schema,
-	direction = "dark-room",
 	bare = false,
 } = Astro.props;
 
@@ -36,25 +32,26 @@ const socialImage = new URL(socialImageUrl ?? SOCIAL_IMAGE, url).href;
 
 const nav = [
 	{ href: "/", label: "Gallery" },
+	{ href: "/map/", label: "Map" },
 	{ href: "/admin/", label: "Upload" },
 ];
 ---
 
 <!doctype html>
-<html lang="en" data-direction={direction}>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b1015" />
-    {/* Applied before first paint so a stored theme never flashes the default one. */}
-    <script is:inline>
-      try {
-        const stored = localStorage.getItem("direction");
-        if (stored === "dark-room" || stored === "flight-log" || stored === "paper-sky") {
-          document.documentElement.dataset.direction = stored;
-        }
-      } catch {}
-    </script>
+    {/*
+      The reader's OS picks the theme — Paper Sky in light, Dark Room in dark
+      (see `src/index.css`). `color-scheme` hands the same choice to the things
+      the page does not paint itself: scrollbars, form controls, the canvas
+      behind an overscroll. Both are declarative, so there is nothing to apply
+      before first paint and nothing to flash.
+    */}
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f8fbfc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1015" media="(prefers-color-scheme: dark)" />
     <link rel="canonical" href={url.href} />
     <title>{title}</title>
     <meta name="description" content={description} />
@@ -147,13 +144,6 @@ const nav = [
                 {label}
               </a>
             ))}
-
-            <div class="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-3 sm:mt-0 sm:border-0 sm:pt-0">
-              <span class="px-3 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground sm:hidden">
-                Theme
-              </span>
-              <DirectionSwitch />
-            </div>
           </nav>
         </div>
       </header>
@@ -206,7 +196,7 @@ const nav = [
 
         // Navigating away or picking a theme both mean the menu has done its job.
         menuPanel.addEventListener("click", (event) => {
-          if ((event.target as HTMLElement).closest("a, [data-set-direction]")) setMenu(false);
+          if ((event.target as HTMLElement).closest("a")) setMenu(false);
         });
       }
     </script>
