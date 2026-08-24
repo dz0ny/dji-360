@@ -367,6 +367,22 @@
   }
 }
 
+/*
+  The panorama chrome — the floating control pill, the peak labels, the view
+  chips — sits on top of a photograph inside a black stage, and that stage is
+  black in both directions. It cannot take `--brand-primary`: in Paper Sky that
+  token is a near-black slate, which is correct against paper and invisible
+  against a photograph.
+
+  So the chrome keeps one fixed accent, the Dark Room sky-cyan, whichever half
+  of the pair the page around it is using.
+*/
+@layer base {
+  :root {
+    --chrome-accent: 184.4 99.7% 45.4%;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

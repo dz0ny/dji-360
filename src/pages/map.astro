@@ -7,22 +7,32 @@ import type { WithContext, CollectionPage } from "schema-dts";
   Where every panorama was flown.
 
   The archive listing already carries lat/lon for anything the camera geotagged,
-  so this page is the same `/~/api/photos` payload read a second way. Leaflet is
-  imported by the page script rather than the layout — it is ~150 kB and only
-  this route needs it.
+  so this page is the same `/~/api/photos` payload read a second way. MapLibre is
+  imported by the page script rather than the layout — it is the heaviest thing
+  on the site and only this route needs it.
 
-  Tiles come straight from openstreetmap.org, the same host `staticmap.ts`
-  already uses for the in-viewer minimap: no key, no proxy, and the CSP's
-  `img-src https:` already allows it.
+  The map is drawn in 3D over real terrain, following MapLibre's own 3d-terrain
+  example, because most of these panoramas are flown over mountains and a flat
+  slippy map throws that away. Neither source needs a key, unlike the MapTiler
+  tiles that example uses:
+
+  - raster basemap — openstreetmap.org, the same host `staticmap.ts` already
+    uses for the in-viewer minimap;
+  - elevation — the AWS Terrain Tiles open dataset, in Mapzen's `terrarium`
+    encoding, draped under the raster as both the DEM and a hillshade.
+
+  The CSP already allows both (`img-src https:`), and MapLibre's blob workers
+  are covered by `worker-src blob:`.
 
   DESIGN — the map is dressed as the camera's own display rather than as a
-  widget: a live telemetry readout of the centre in the bottom-left, and pins
+  widget: a live telemetry readout of the centre — coordinates, zoom, and the
+  ground elevation the DEM reports there — in the bottom-left, and pins
   that carry a viewfinder cone when the camera recorded which way the frame faced.
   Both carry real information. Corner framing marks were tried and cut — they
   read as decoration and collided with the zoom control.
 */
 
-import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 const DESCRIPTION = "Every geotagged 360° panorama in the archive, plotted on one map.";
 
@@ -81,7 +91,7 @@ const schema: WithContext<CollectionPage> = {
       {/* Telemetry. Whatever the map is centred on, in the camera's own units. */}
       <p class="map-readout" data-map-readout aria-hidden="true"></p>
 
-      {/* Covers the map until Leaflet paints, so tiles never fade in over a bare box. */}
+      {/* Covers the map until MapLibre paints, so tiles never fade in over a bare box. */}
       <div
         class="pointer-events-none absolute inset-0 z-[600] grid place-items-center bg-muted font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-500"
         data-map-veil
@@ -95,7 +105,7 @@ const schema: WithContext<CollectionPage> = {
 </Layout>
 
 <style>
-  /* Bottom-left so it never collides with Leaflet's attribution, which is
+  /* Bottom-left so it never collides with MapLibre's attribution, which is
      pinned bottom-right and must stay legible. */
   .map-readout {
     position: absolute;
@@ -130,25 +140,37 @@ const schema: WithContext<CollectionPage> = {
 
 <style is:global>
   /*
-    Leaflet stamps its own class names on the elements it creates, so none of
+    MapLibre stamps its own class names on the elements it creates, so none of
     this can be scoped — Astro's scoping attribute never lands on them.
     Everything below is namespaced under `#flight-map` or a `pano-` class.
   */
 
   /* OSM ships one bright raster set. In Dark Room it would glow like a lightbox
-     in the middle of the page, so the tiles — and only the tiles — are inverted
-     back into the palette. Paper Sky leaves them as drawn.
+     in the middle of the page, so the canvas — tiles, hillshade, and sky alike —
+     is inverted back into the palette. Because the invert is paired with a 180°
+     hue rotation it flips lightness while keeping hue, so the sky stays blue
+     rather than turning orange. Paper Sky leaves it as drawn.
 
      Declared twice for the same reason the palettes are: a media query and a
      plain selector cannot share one block. */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-direction='paper-sky']) #flight-map .leaflet-tile {
+    :root:not([data-direction='paper-sky']) #flight-map .maplibregl-canvas {
       filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+    }
+
+    :root:not([data-direction='paper-sky']) #flight-map .maplibregl-ctrl-icon {
+      filter: invert(1);
     }
   }
 
-  [data-direction='dark-room'] #flight-map .leaflet-tile {
+  [data-direction='dark-room'] #flight-map .maplibregl-canvas {
     filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+  }
+
+  /* MapLibre's control glyphs are black SVGs baked into its stylesheet; on a
+     dark control they would be invisible. */
+  [data-direction='dark-room'] #flight-map .maplibregl-ctrl-icon {
+    filter: invert(1);
   }
 
   #flight-map {
@@ -158,31 +180,42 @@ const schema: WithContext<CollectionPage> = {
     font-family: var(--type-body);
   }
 
-  #flight-map .leaflet-control-attribution {
+  #flight-map .maplibregl-ctrl-attrib {
     background: hsl(var(--background) / 0.8);
     color: hsl(var(--muted-foreground));
     font-family: var(--type-meta);
     font-size: 0.5625rem;
   }
 
-  #flight-map .leaflet-control-attribution a {
+  #flight-map .maplibregl-ctrl-attrib a {
     color: hsl(var(--brand-primary));
   }
 
-  #flight-map .leaflet-control-zoom {
-    border: 0;
-  }
-
-  #flight-map .leaflet-control-zoom a {
+  #flight-map .maplibregl-ctrl-group {
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-sm);
     background: hsl(var(--background) / 0.85);
-    color: hsl(var(--foreground));
-    border-color: hsl(var(--border));
     backdrop-filter: blur(8px);
+    box-shadow: none;
   }
 
-  #flight-map .leaflet-control-zoom a:hover {
+  #flight-map .maplibregl-ctrl-group button {
+    background: transparent;
+    color: hsl(var(--foreground));
+  }
+
+  #flight-map .maplibregl-ctrl-group button + button {
+    border-top-color: hsl(var(--border));
+  }
+
+  #flight-map .maplibregl-ctrl-group button:hover {
     background: hsl(var(--accent));
-    color: hsl(var(--brand-primary));
+  }
+
+  /* The 3D toggle is a state, not a one-shot action, so it says which one it
+     is in rather than leaving the reader to guess from the horizon. */
+  #flight-map .maplibregl-ctrl-terrain-enabled {
+    background: hsl(var(--brand-primary) / 0.18);
   }
 
   /* ── Pins ──────────────────────────────────────────────────────────────
@@ -283,7 +316,7 @@ const schema: WithContext<CollectionPage> = {
   }
 
   .pano-pin-wrap:has(.pano-pin[data-active]) .pano-pin__cone,
-  .leaflet-marker-icon:focus-visible .pano-pin__cone,
+  .pano-pin-wrap:focus-visible .pano-pin__cone,
   .pano-pin-wrap:hover .pano-pin__cone {
     background: radial-gradient(
       circle at 50% 50%,
@@ -293,7 +326,7 @@ const schema: WithContext<CollectionPage> = {
     opacity: 0.9;
   }
 
-  .leaflet-marker-icon:focus-visible .pano-pin,
+  .pano-pin-wrap:focus-visible .pano-pin,
   .pano-pin:hover,
   .pano-pin[data-active] {
     transform: scale(1.25);
@@ -301,30 +334,44 @@ const schema: WithContext<CollectionPage> = {
   }
 
   /* ── Popup ─────────────────────────────────────────────────────────────
-     Leaflet's default is a white bubble with a white tail; both are repainted
-     so the popup belongs to whichever direction is active. */
-  .leaflet-popup-content-wrapper,
-  .leaflet-popup-tip {
+     MapLibre's default is a white bubble with a white tail; both are repainted
+     so the popup belongs to whichever direction is active. The tail is a CSS
+     border triangle whose colour lives on a different edge for every anchor,
+     which is why it takes four rules rather than one. */
+  .maplibregl-popup-content {
+    overflow: hidden;
+    padding: 0;
+    width: 15rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
     background: hsl(var(--popover));
     color: hsl(var(--popover-foreground));
-    border-radius: var(--radius);
     box-shadow: var(--shadow-3);
   }
 
-  .leaflet-popup-content-wrapper {
-    overflow: hidden;
-    padding: 0;
-    border: 1px solid hsl(var(--border));
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+    border-bottom-color: hsl(var(--popover));
   }
 
-  .leaflet-popup-content {
-    margin: 0;
-    width: 15rem !important;
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+    border-top-color: hsl(var(--popover));
+  }
+
+  .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+    border-right-color: hsl(var(--popover));
+  }
+
+  .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+    border-left-color: hsl(var(--popover));
   }
 
   /* The bubble opens on a photograph, and a bright sky swallows a bare glyph —
      so the close control carries its own disc. */
-  .leaflet-container a.leaflet-popup-close-button {
+  .maplibregl-popup-close-button {
     top: 0.375rem;
     right: 0.375rem;
     width: 1.5rem;
@@ -341,7 +388,7 @@ const schema: WithContext<CollectionPage> = {
       color 150ms ease;
   }
 
-  .leaflet-container a.leaflet-popup-close-button:hover {
+  .maplibregl-popup-close-button:hover {
     background: hsl(var(--background) / 0.9);
     color: hsl(var(--brand-primary));
   }
@@ -406,7 +453,8 @@ const schema: WithContext<CollectionPage> = {
 </style>
 
 <script>
-  import L from "leaflet";
+  import * as maplibregl from "maplibre-gl";
+  import type { StyleSpecification } from "maplibre-gl";
   import {
     displayTitle,
     escapeHtml,
@@ -534,7 +582,12 @@ const schema: WithContext<CollectionPage> = {
     }
   }
 
-  function pinIcon(site: Site, index: number) {
+  /**
+   * MapLibre markers take a DOM node rather than an HTML string, and unlike
+   * Leaflet's they are not focusable on their own — hence the explicit button
+   * role, so the pins stay reachable from the keyboard.
+   */
+  function pinElement(site: Site, index: number): HTMLElement {
     const count = site.photos.length;
     // Stagger the drop-in, but cap it so a long archive is not still landing
     // pins after a second and a half.
@@ -546,23 +599,30 @@ const schema: WithContext<CollectionPage> = {
         ? ""
         : `<span class="pano-pin__cone" style="--heading:${heading}deg;--pin-delay:${delay}ms"></span>`;
 
-    return L.divIcon({
-      className: "",
-      html: `<span class="pano-pin-wrap" aria-hidden="true">${cone}<span class="pano-pin" style="--pin-delay:${delay}ms">${count > 1 ? count : ""}</span></span>`,
-      iconSize: [20, 20],
-      iconAnchor: [10, 10],
-      popupAnchor: [0, -12],
-    });
+    const el = document.createElement("div");
+    el.className = "pano-pin-wrap";
+    el.tabIndex = 0;
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", siteLabel(site));
+    el.innerHTML = `${cone}<span class="pano-pin" style="--pin-delay:${delay}ms">${count > 1 ? count : ""}</span>`;
+    return el;
   }
 
-  /** The centre of the map, in the units the camera writes into its own files. */
-  function renderReadout(center: L.LatLng, zoom: number) {
+  /**
+   * The centre of the map, in the units the camera writes into its own files.
+   * The elevation is the DEM's reading for that point, so it is absent while
+   * terrain is switched off or its tiles have not landed yet.
+   */
+  function renderReadout(map: maplibregl.Map) {
     if (!readoutEl) return;
+    const center = map.getCenter();
     const ns = center.lat >= 0 ? "N" : "S";
     const ew = center.lng >= 0 ? "E" : "W";
+    const ground = map.queryTerrainElevation(center);
     readoutEl.innerHTML =
       `${Math.abs(center.lat).toFixed(4)}°${ns} ${Math.abs(center.lng).toFixed(4)}°${ew}` +
-      ` <b>Z${zoom}</b>`;
+      ` <b>Z${map.getZoom().toFixed(1)}</b>` +
+      (ground == null ? "" : ` ${Math.round(ground)} m`);
   }
 
   async function load() {
@@ -596,15 +656,75 @@ const schema: WithContext<CollectionPage> = {
     }
 
     // ── Map ──────────────────────────────────────────────────────────────
-    const map = L.map(container, {
+    /*
+      An inline style rather than a hosted one: two keyless raster sources are
+      all this needs, and a style URL would be a third-party dependency for a
+      page that already knows exactly what it wants drawn.
+    */
+    const style: StyleSpecification = {
+      version: 8,
+      sources: {
+        osm: {
+          type: "raster",
+          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        },
+        // Mapzen's terrarium encoding, hosted as an AWS open dataset. Global
+        // coverage stops at z15, which is finer than the DEM itself resolves.
+        terrain: {
+          type: "raster-dem",
+          tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          maxzoom: 15,
+          encoding: "terrarium",
+          attribution: '<a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a>',
+        },
+      },
+      layers: [
+        { id: "osm", type: "raster", source: "osm" },
+        // OSM draws contours but no relief. A light hillshade off the same DEM
+        // keeps the ridges readable while the map is still looking straight down.
+        {
+          id: "hillshade",
+          type: "hillshade",
+          source: "terrain",
+          paint: { "hillshade-exaggeration": 0.3 },
+        },
+      ],
+      sky: {
+        "sky-color": "#8ec5ff",
+        "horizon-color": "#dcecff",
+        "fog-color": "#dcecff",
+        "sky-horizon-blend": 0.7,
+        "horizon-fog-blend": 0.6,
+        "fog-ground-blend": 0.6,
+      },
+      terrain: { source: "terrain", exaggeration: 1 },
+    };
+
+    const bounds = new maplibregl.LngLatBounds();
+    for (const site of sites) bounds.extend([site.lon, site.lat]);
+
+    const map = new maplibregl.Map({
+      container,
+      style,
+      center: bounds.getCenter(),
+      zoom: 12,
+      // Tilted from the first frame: a 3D map that opens flat looks broken.
+      pitch: 60,
+      maxPitch: 85,
       // One finger pans: the map is what this page is, unlike the spheres
       // embedded in a scrolling gallery. The wheel is the one gesture held
       // back, below, because that one belongs to the page.
-      scrollWheelZoom: false,
-      worldCopyJump: true,
-      zoomControl: true,
-      attributionControl: true,
+      scrollZoom: false,
+      attributionControl: { compact: true },
     });
+
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    // Terrain ships on in the style above, so this button turns it off.
+    map.addControl(new maplibregl.TerrainControl({ source: "terrain", exaggeration: 1 }), "top-right");
 
     // Ctrl/⌘ + wheel zooms; a bare wheel keeps scrolling the page.
     container.addEventListener(
@@ -612,81 +732,79 @@ const schema: WithContext<CollectionPage> = {
       (event) => {
         if (!event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
-        map.setZoom(map.getZoom() - Math.sign(event.deltaY));
+        map.zoomTo(map.getZoom() - Math.sign(event.deltaY), { duration: 200 });
       },
       { passive: false },
     );
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    const markers = sites.map((site, index) => {
+      const popup = new maplibregl.Popup({
+        maxWidth: "260px",
+        closeButton: true,
+        // Clear of the dot, which is anchored on its own centre.
+        offset: 16,
+      }).setHTML(popupHtml(site));
 
-    const markers = sites.map((site, index) =>
-      L.marker([site.lat, site.lon], {
-        icon: pinIcon(site, index),
-        title: siteLabel(site),
-        alt: siteLabel(site),
-        riseOnHover: true,
-      })
-        .bindPopup(popupHtml(site), {
-          maxWidth: 260,
-          minWidth: 240,
-          closeButton: true,
-          autoPanPadding: [24, 24],
-        })
-        .addTo(map),
-    );
+      const element = pinElement(site, index);
+      const marker = new maplibregl.Marker({ element, anchor: "center" })
+        .setLngLat([site.lon, site.lat])
+        .setPopup(popup)
+        .addTo(map);
 
-    map.on("popupopen", (event) => {
-      const node = event.popup.getElement();
-      if (node) coverFallback(node);
+      // MapLibre binds the popup to a click; the keyboard has to be wired up.
+      element.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        marker.togglePopup();
+      });
+
+      popup.on("open", () => {
+        const node = popup.getElement();
+        if (node) coverFallback(node);
+        setActive(index);
+      });
+      popup.on("close", () => setActive(null));
+
+      return marker;
     });
 
-    map.on("move zoom", () => renderReadout(map.getCenter(), map.getZoom()));
+    /*
+      An open popup keeps its own pin lit. With pins packed this close the
+      reader otherwise loses track of which one they opened.
+    */
+    function setActive(index: number | null) {
+      markers.forEach((marker, i) => {
+        const pin = marker.getElement().querySelector<HTMLElement>(".pano-pin");
+        pin?.toggleAttribute("data-active", i === index);
+      });
+    }
 
-    const bounds = L.latLngBounds(sites.map((site) => [site.lat, site.lon] as [number, number]));
+    map.on("move", () => renderReadout(map));
 
     /*
-      `fitBounds` solves for the container's pixel size, and Leaflet measured
-      that the moment `L.map()` ran — before the browser had laid the grid out.
-      A stale size makes it fall back to the whole world, so re-measure on the
+      `fitBounds` solves for the container's pixel size, and MapLibre measured
+      that when the map was constructed — before the browser had laid the grid
+      out. A stale size makes it frame the wrong window, so re-measure on the
       next frame and only then frame the pins.
     */
     const frame = () => {
-      map.invalidateSize(false);
+      map.resize();
       // A single site has zero-area bounds, which `fitBounds` cannot solve for.
       if (sites.length === 1) {
-        map.setView(bounds.getCenter(), 14);
+        map.jumpTo({ center: bounds.getCenter(), zoom: 14, pitch: 60 });
       } else {
-        map.fitBounds(bounds, { padding: [56, 56], maxZoom: 15 });
+        map.fitBounds(bounds, { padding: 56, maxZoom: 15, pitch: 60, duration: 0 });
       }
-      renderReadout(map.getCenter(), map.getZoom());
+      renderReadout(map);
     };
 
-    // Fit once now so the first paint is already in the right place, and again
-    // after layout settles in case the grid or the fonts moved anything.
-    frame();
-    requestAnimationFrame(frame);
-
-    veilEl?.classList.add("opacity-0");
-
-    /*
-      An open popup keeps its own pin lit. Leaflet raises the marker a popup is
-      attached to but does not mark it, and with pins packed this close the
-      reader otherwise loses track of which one they opened.
-    */
-    const setActive = (index: number | null) => {
-      markers.forEach((marker, i) => {
-        const pin = marker.getElement()?.querySelector<HTMLElement>(".pano-pin");
-        pin?.toggleAttribute("data-active", i === index);
-      });
-    };
-
-    markers.forEach((marker, index) => {
-      marker.on("popupopen", () => setActive(index));
-      marker.on("popupclose", () => setActive(null));
+    map.once("load", () => {
+      frame();
+      veilEl?.classList.add("opacity-0");
     });
+
+    // And again after layout settles, in case the grid or the fonts moved anything.
+    requestAnimationFrame(frame);
   }
 
   void load();

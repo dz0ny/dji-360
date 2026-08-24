@@ -180,7 +180,7 @@ const {
   */
   @media (hover: hover) {
     .pano .psv-button:hover {
-      background: color-mix(in srgb, hsl(var(--brand-primary)) 26%, transparent);
+      background: color-mix(in srgb, hsl(var(--chrome-accent)) 26%, transparent);
     }
   }
 
@@ -188,7 +188,7 @@ const {
      would otherwise win the cascade and paint an off-palette blue ring. */
   .pano .psv-button:not(.psv-button--disabled):focus-visible {
     background: none;
-    outline: 2px solid hsl(var(--brand-primary));
+    outline: 2px solid hsl(var(--chrome-accent));
     outline-offset: -3px;
   }
 
@@ -235,7 +235,7 @@ const {
   /* Toggles (gyroscope, fullscreen) tint their glyph rather than their whole disc. */
   .pano .psv-button.psv-button--active {
     background: none;
-    color: hsl(var(--brand-primary));
+    color: hsl(var(--chrome-accent));
   }
 
   /*
@@ -296,7 +296,7 @@ const {
 
   .pano .pano-quality__bars i[data-lit] {
     opacity: 1;
-    background: hsl(var(--brand-primary));
+    background: hsl(var(--chrome-accent));
   }
 
   /*
@@ -313,7 +313,7 @@ const {
   }
 
   .pano .pano-quality__bars i[data-loading] {
-    background: hsl(var(--brand-primary));
+    background: hsl(var(--chrome-accent));
     animation: pano-quality-pulse 900ms ease-in-out infinite;
   }
 
@@ -417,8 +417,8 @@ const {
     width: 5px;
     height: 5px;
     border-radius: 9999px;
-    background: hsl(var(--brand-primary));
-    box-shadow: 0 0 6px hsl(var(--brand-primary) / 0.8);
+    background: hsl(var(--chrome-accent));
+    box-shadow: 0 0 6px hsl(var(--chrome-accent) / 0.8);
   }
 
   .pano .psv-caption {
@@ -434,7 +434,7 @@ const {
   }
 
   .pano .psv-loader-canvas circle + circle {
-    stroke: hsl(var(--brand-primary));
+    stroke: hsl(var(--chrome-accent));
   }
 
   /*
