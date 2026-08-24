@@ -239,27 +239,99 @@ const {
   }
 
   /*
-    Quality is a cycler, not a menu: one button that reads out the texture it
-    will switch to next. It is the only button in the pill with text in it, so
-    it sizes to its label instead of the 40px disc the glyph buttons use.
+    Quality is a cycler, not a menu: one button that steps up through the
+    textures the archive holds for this panorama.
+
+    It shows signal bars — one per available size, lit up to the one on screen —
+    because that is the shape every reader already knows for "how much of this
+    am I getting", and because the unlit bars above are what say a better one
+    exists. The old button read out its *destination* ("8K" while you were
+    watching 4K), which is unambiguous only once you already know the rule.
+    The bars carry the state; the number beside them names it.
+
+    It is the only button in the pill with text in it, so it sizes to its
+    contents rather than taking the 40px disc the glyph buttons use.
   */
   .pano .psv-button.pano-quality {
     width: auto;
     min-width: 40px;
-    padding-inline: 0.75rem;
+    gap: 0.4375rem;
+    padding-inline: 0.625rem;
     font-family: var(--type-meta);
     font-size: 0.625rem;
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     white-space: nowrap;
   }
 
-  /* Mid-swap the label is stale, so it says so rather than lying about the
-     texture on screen. */
+  .pano .pano-quality__bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    /* Matches the cap height of the label sitting next to it. */
+    height: 0.75rem;
+  }
+
+  .pano .pano-quality__bars i {
+    width: 3px;
+    border-radius: 1px;
+    background: currentColor;
+    /* Unlit rungs stay visible: an empty slot is the whole signal that there is
+       somewhere left to go. */
+    opacity: 0.28;
+    transition:
+      opacity 220ms ease,
+      background-color 220ms ease;
+  }
+
+  /* Ascending, shortest first — 5px, 8.5px, 12px for a three-rung ladder. */
+  .pano .pano-quality__bars i:nth-child(1) { height: 42%; }
+  .pano .pano-quality__bars i:nth-child(2) { height: 71%; }
+  .pano .pano-quality__bars i:nth-child(3) { height: 100%; }
+
+  /* Two rungs only: skip the middle height so they still read as a climb. */
+  .pano .pano-quality__bars[data-count='2'] i:nth-child(1) { height: 55%; }
+  .pano .pano-quality__bars[data-count='2'] i:nth-child(2) { height: 100%; }
+
+  .pano .pano-quality__bars i[data-lit] {
+    opacity: 1;
+    background: hsl(var(--brand-primary));
+  }
+
+  /*
+    Mid-swap the lit bars still describe what is on screen — they must not jump
+    ahead of the pixels. The rung being fetched pulses instead, so the wait
+    reads as "that one is coming" rather than as a dead grey button.
+  */
   .pano .psv-button.pano-quality[data-busy] {
-    color: rgb(255 255 255 / 0.5);
     pointer-events: none;
+  }
+
+  .pano .psv-button.pano-quality[data-busy] .pano-quality__label {
+    opacity: 0.55;
+  }
+
+  .pano .pano-quality__bars i[data-loading] {
+    background: hsl(var(--brand-primary));
+    animation: pano-quality-pulse 900ms ease-in-out infinite;
+  }
+
+  @keyframes pano-quality-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.2;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pano .pano-quality__bars i[data-loading] {
+      animation: none;
+      opacity: 0.6;
+    }
   }
 
   /*
@@ -531,8 +603,9 @@ const {
    * Quality switching used to be the settings + resolution plugins: a gear
    * button, a panel, a "Quality" row, a submenu — four taps and two extra
    * bundles to move between two textures. With only ever a handful of sizes it
-   * is a cycler instead. One button, labelled with the size it will switch to,
-   * driven by `viewer.setPanorama` (which keeps the current view position).
+   * is a cycler instead: one button, stepping up through them and wrapping back
+   * to the smallest, driven by `viewer.setPanorama` (which keeps the current
+   * view position).
    */
   const QUALITY_BUTTON_ID = "quality";
 
@@ -540,21 +613,60 @@ const {
     return (resolution.short || resolution.id).toUpperCase();
   }
 
-  /** The button advertises its *destination*, so a tap does what the label says. */
+  /**
+   * Signal bars: one rung per size the archive holds, lit up to the one on
+   * screen, with the current size named beside them.
+   *
+   * The button used to read out its *destination* — "8K" while you were looking
+   * at the 4K texture — which only parses once you already know that is the
+   * rule. Bars are the shape everyone already reads as "how much of this am I
+   * getting", and the unlit rungs above are what say there is more to be had.
+   * The action moves to `aria-label`, where it can be a whole sentence.
+   */
   function paintQualityButton(el: PanoElement, viewer: Viewer) {
     const button = viewer.navbar.getButton(QUALITY_BUTTON_ID, false)?.container;
     if (!button) return;
 
     const list = el._panoResolutions ?? [];
+    // One size is not a choice, and a lone bar reads as a broken control.
     if (list.length < 2) {
       button.style.display = "none";
       return;
     }
 
-    const next = list[((el._panoResolutionIndex ?? 0) + 1) % list.length];
+    const index = el._panoResolutionIndex ?? 0;
+    const current = list[index];
+    const next = list[(index + 1) % list.length];
+
     button.style.display = "";
-    button.textContent = shortLabel(next);
-    button.setAttribute("aria-label", `Switch to ${next.label}`);
+
+    // Built as nodes rather than a template: `pano:meta` is a public event, so
+    // the labels it carries go in as text and never as markup.
+    button.replaceChildren();
+
+    const bars = document.createElement("span");
+    bars.className = "pano-quality__bars";
+    bars.dataset.count = String(list.length);
+    bars.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < list.length; i++) {
+      const bar = document.createElement("i");
+      if (i <= index) bar.dataset.lit = "";
+      bars.append(bar);
+    }
+
+    const label = document.createElement("span");
+    label.className = "pano-quality__label";
+    label.setAttribute("aria-hidden", "true");
+    label.textContent = shortLabel(current);
+
+    button.append(bars, label);
+
+    // Screen readers get the state and the consequence; the bars are decoration
+    // to them. The wrap back to the smallest is worth saying out loud — it is
+    // the one step the bars cannot draw, since every rung goes dark at once.
+    const wraps = index === list.length - 1;
+    const action = wraps ? `back down to ${next.label}` : `up to ${next.label}`;
+    button.setAttribute("aria-label", `Quality: ${current.label}. Switch ${action}.`);
   }
 
   async function cycleQuality(el: PanoElement, viewer: Viewer) {
@@ -565,14 +677,21 @@ const {
     const index = ((el._panoResolutionIndex ?? 0) + 1) % list.length;
     const next = list[index];
 
-    // A second tap mid-swap would queue a texture nobody asked for; the label is
-    // stale until the new one lands, so the button says so and stops listening.
+    /*
+      A second tap mid-swap would queue a texture nobody asked for, so the
+      button stops listening until this one lands. The lit bars keep describing
+      what is actually on screen — only the rung being fetched pulses, which is
+      the honest way to show a texture that is on its way but not yet visible.
+    */
     button?.setAttribute("data-busy", "");
+    button?.querySelectorAll<HTMLElement>(".pano-quality__bars i")[index]?.setAttribute("data-loading", "");
+
     try {
       await viewer.setPanorama(next.panorama, { transition: false, showLoader: true });
       el._panoResolutionIndex = index;
     } finally {
       button?.removeAttribute("data-busy");
+      // Repaint rebuilds the bars, which clears the pulse along with them.
       paintQualityButton(el, viewer);
     }
   }
