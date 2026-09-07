@@ -52,6 +52,7 @@ Worker with two routes, one bucket.
 - Drag, pinch, or tilt to look around; gyroscope on mobile, autorotate on the hero
 - Minimap showing where the frame was taken, stitched from OpenStreetMap tiles in the browser — no map API key
 - Quality switch between a 4096px preview texture and the full-resolution original
+- A 15-second video of any panorama — little planet, unrolling into a 360° horizon sweep — rendered and encoded **in the browser**, portrait for a story or landscape for everywhere else
 - Every derivative is generated **client-side** from a single decode before upload
 - A 1200×630 social card per panorama, cropped to a 110° slice of the horizon rather than the whole squashed sphere
 - Three complete themes — Dark Room, Flight Log, Paper Sky — switchable at runtime and applied before first paint
@@ -68,6 +69,7 @@ Worker with two routes, one bucket.
 | Quality | 4K preview by default; the full-resolution WebP archive one tap away, with its size shown before you commit to it |
 | Upload | Drag a stitched JPEG in; the browser decodes once and writes four derivatives, cover → preview → original → thumb |
 | Social cards | Each upload stores a 1200×630 horizon crop at `/~/img/cover/<id>`, ready for link previews |
+| Reels | 1080×1920 or 1920×1080 H.264 MP4, 15s at 30fps, rendered by a WebGL projection shader and encoded with WebCodecs. Title and coordinates burned into the frame, saved through the share sheet on a phone |
 | Themes | Dark / Log / Paper switch in the header, persisted to `localStorage`, re-applied by an inline head script |
 | Access control | `GET /~/api/photos` is public; every mutation verifies the Cloudflare Access JWT itself |
 | Agent readiness | `llms.txt`, `robots.txt`, `Content-Signal` preferences, and JSON-LD on every page |
@@ -87,6 +89,14 @@ Worker with two routes, one bucket.
    whole database.
 
 The Worker never touches a pixel. It lists, streams, and checks a JWT.
+
+Video is the same bargain. `src/lib/reel.ts` re-projects the sphere with its own
+fragment shader — every output pixel casts a ray, so a frame is exactly the size
+asked for rather than whatever the window happens to be — and hands each frame
+to WebCodecs, which the hardware encoder chews through far faster than real
+time. Fifteen seconds of 1080p takes about four. The projection blends the
+stereographic little planet into a near-rectilinear horizon on one parameter, so
+the unroll is a single continuous camera move rather than a cross-fade.
 
 ## Stack
 

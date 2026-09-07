@@ -24,7 +24,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
         Sized with h-full rather than `absolute inset-0` — the component root is
         already `relative`, and Tailwind's stylesheet order makes that win over a
         caller's `absolute`, which would collapse the sphere to zero height. */}
-    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers peaks />
+    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers peaks reel />
 
     <div
       data-pano-chrome
@@ -45,6 +45,31 @@ import PanoViewer from "@/components/PanoViewer.astro";
         <button type="button" class="view-chip view-chip--icon" data-view-next aria-label="Next panorama" hidden>
           <span aria-hidden="true">›</span>
         </button>
+
+        {/* The pill's reel button opens this same row — it is the one control
+            with a choice attached, and a fifteen-second render is too long a
+            commitment to start from a glyph nobody can read the aspect off. */}
+        <button
+          type="button"
+          class="view-chip"
+          data-reel-open
+          aria-expanded="false"
+          aria-controls="reel-formats"
+          hidden
+        >
+          <span aria-hidden="true">▶</span> Reel
+        </button>
+      </div>
+
+      <div id="reel-formats" class="mt-1.5 flex flex-wrap items-center gap-1.5 px-3" data-reel-formats hidden>
+        <button type="button" class="view-chip" data-reel-format="story">
+          Story <span class="text-white/45">9:16</span>
+        </button>
+        <button type="button" class="view-chip" data-reel-format="wide">
+          Wide <span class="text-white/45">16:9</span>
+        </button>
+        <button type="button" class="view-chip" data-reel-cancel hidden>Cancel</button>
+        <p class="pointer-events-none font-mono text-[0.5625rem] uppercase tracking-[0.14em] text-white/60" data-reel-status role="status"></p>
       </div>
     </div>
 
@@ -200,6 +225,8 @@ import PanoViewer from "@/components/PanoViewer.astro";
   import type { Photo } from "@/lib/photos";
   import { fetchPeaks, formatDistance, placePeaks, spherePosition } from "@/lib/peaks";
   import type { PeaksPayload, PlacedPeak } from "@/lib/peaks";
+  import { canRenderReel, reelFilename, renderReel, saveReel, REEL_FORMATS } from "@/lib/reel";
+  import type { ReelFormat } from "@/lib/reel";
 
   const ID_RE = /^[a-z0-9][a-z0-9-]{4,63}$/;
 
@@ -227,6 +254,10 @@ import PanoViewer from "@/components/PanoViewer.astro";
   const headingInput = document.querySelector<HTMLInputElement>("[data-peaks-heading]");
   const headingOut = document.querySelector<HTMLOutputElement>("[data-peaks-heading-out]");
   const saveStatusEl = document.querySelector<HTMLElement>("[data-peaks-save-status]");
+  const reelOpenEl = document.querySelector<HTMLButtonElement>("[data-reel-open]");
+  const reelFormatsEl = document.querySelector<HTMLElement>("[data-reel-formats]");
+  const reelCancelEl = document.querySelector<HTMLButtonElement>("[data-reel-cancel]");
+  const reelStatusEl = document.querySelector<HTMLElement>("[data-reel-status]");
 
   let photos: Photo[] = [];
   let current: Photo | null = null;
@@ -367,6 +398,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
     }
     loadSphere(photo);
     renderChrome(photo);
+    paintReel();
     void loadPeaks(photo);
   }
 
@@ -575,6 +607,111 @@ import PanoViewer from "@/components/PanoViewer.astro";
     }
   });
 
+  // --- the reel ------------------------------------------------------------
+
+  /*
+    Rendering happens here rather than in the viewer for the same reason the
+    summit labels do: the clip needs the title, the date and the coordinates,
+    and the sphere knows none of them. The viewer contributes a button and the
+    progress ring; everything below decides what gets made.
+  */
+  type ReelState = "idle" | "working" | "done";
+
+  let reelAvailable = false;
+  let reelState: ReelState = "idle";
+  let reelProgress = 0;
+  let reelJob: AbortController | null = null;
+
+  /** Both surfaces, from one place: the pill's ring and the top-bar row. */
+  function paintReel() {
+    document.dispatchEvent(
+      new CustomEvent("pano:reel-button", {
+        detail: { target: "#stage", available: reelAvailable, state: reelState, progress: reelProgress },
+      }),
+    );
+
+    if (reelOpenEl) reelOpenEl.hidden = !reelAvailable;
+    if (reelCancelEl) reelCancelEl.hidden = reelState !== "working";
+    // No photo yet means no title, no date and no texture to render from — the
+    // archive listing can still be in flight, or have failed outright.
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-reel-format]")) {
+      button.disabled = reelState === "working" || !current;
+    }
+  }
+
+  function setReelStatus(message: string) {
+    if (reelStatusEl) reelStatusEl.textContent = message;
+  }
+
+  function openReelRow(open: boolean) {
+    if (!reelFormatsEl || !reelOpenEl) return;
+    reelFormatsEl.hidden = !open;
+    reelOpenEl.setAttribute("aria-expanded", String(open));
+    if (open && reelState === "idle") setReelStatus("15s · saves to your device");
+  }
+
+  async function startReel(format: ReelFormat) {
+    // The reader can page to the next panorama mid-render; the clip belongs to
+    // the one that was on screen when they asked for it.
+    const photo = current;
+    if (!photo || reelState === "working") return;
+
+    const title = displayTitle(photo);
+    const job = new AbortController();
+    reelJob = job;
+    reelState = "working";
+    reelProgress = 0;
+    paintReel();
+    setReelStatus(`Rendering ${REEL_FORMATS[format].ratio} · 0%`);
+
+    try {
+      const blob = await renderReel({
+        // The 4K sphere texture, which is already in cache from the viewer —
+        // the 8K rung would be a second multi-megabyte download for detail the
+        // little planet throws away anyway.
+        panorama: `${API.img}/preview/${photo.id}`,
+        format,
+        caption: {
+          title,
+          meta: [formatDate(photo), formatCoords(photo)].filter(Boolean).join(" · "),
+        },
+        site: SITE_NAME,
+        signal: job.signal,
+        onProgress: (fraction) => {
+          const percent = Math.round(fraction * 100);
+          if (percent === Math.round(reelProgress * 100)) return;
+          reelProgress = fraction;
+          paintReel();
+          setReelStatus(`Rendering ${REEL_FORMATS[format].ratio} · ${percent}%`);
+        },
+      });
+
+      setReelStatus(`Saving · ${formatBytes(blob.size)}`);
+      await saveReel(blob, reelFilename(title, format), title);
+      reelState = "done";
+      setReelStatus(`${REEL_FORMATS[format].label} saved · ${formatBytes(blob.size)}`);
+    } catch (error) {
+      reelState = "idle";
+      setReelStatus(
+        job.signal.aborted ? "Cancelled" : error instanceof Error ? error.message : "Could not make the video",
+      );
+    } finally {
+      if (reelJob === job) reelJob = null;
+      reelProgress = 0;
+      paintReel();
+    }
+  }
+
+  reelOpenEl?.addEventListener("click", () => openReelRow(reelFormatsEl?.hidden ?? true));
+  reelCancelEl?.addEventListener("click", () => reelJob?.abort());
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-reel-format]")) {
+    button.addEventListener("click", () => void startReel(button.dataset.reelFormat as ReelFormat));
+  }
+
+  /** The pill's button has nowhere to show two aspects, so it opens the row. */
+  document.addEventListener("pano:reel", () => openReelRow(reelFormatsEl?.hidden ?? true));
+
   // --- boot -----------------------------------------------------------------
 
   const id = idFromLocation();
@@ -590,6 +727,17 @@ import PanoViewer from "@/components/PanoViewer.astro";
     document.dispatchEvent(
       new CustomEvent("pano:load", { detail: { target: "#stage", src: `${API.img}/preview/${id}` } }),
     );
+
+    void (async () => {
+      /*
+        A browser without WebCodecs and H.264 cannot produce a file anyone can
+        post, so the button never appears rather than appearing and failing.
+        Off the critical path deliberately — the sphere must not wait on a codec
+        probe, and the answer is only needed once there is a photo to render.
+      */
+      reelAvailable = await canRenderReel();
+      paintReel();
+    })();
 
     void (async () => {
       try {
