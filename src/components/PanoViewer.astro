@@ -50,6 +50,12 @@ interface Props {
 	 * `pano:peaks-button`. The viewer knows nothing about mountains.
 	 */
 	peaks?: boolean;
+	/**
+	 * Add the reel button to the control pill. Like `peaks` it only dispatches
+	 * `pano:reel` — rendering a 15-second story out of the panorama needs the
+	 * title and the coordinates, which are the page's to know, not the sphere's.
+	 */
+	reel?: boolean;
 	class?: string;
 	id?: string;
 }
@@ -66,6 +72,7 @@ const {
 	hash = false,
 	markers = false,
 	peaks = false,
+	reel = false,
 	class: className = "",
 	id,
 } = Astro.props;
@@ -86,6 +93,7 @@ const {
   data-hash={String(hash)}
   data-markers={String(markers)}
   data-peaks={String(peaks)}
+  data-reel={String(reel)}
 >
   {/* Poster / fallback: whatever the caller slots in, usually a flat <Picture>. */}
   <div class="pano-poster absolute inset-0 transition-opacity duration-700" data-pano-poster>
@@ -363,6 +371,34 @@ const {
      which sets their opacity on the node. All this contributes is the fade. */
   .pano .pano-peaks .peaks-icon__panel,
   .pano .pano-peaks .peaks-icon__snow {
+    transition: opacity 180ms ease;
+  }
+
+  /*
+    The reel button. A portrait frame with a play triangle — the shape of the
+    thing it produces, which is the only cue that separates it from the site's
+    other "do something to this panorama" controls.
+
+    While it renders, the disc fills clockwise with a conic gradient driven by
+    `--pano-reel-progress`. A spinner would be a lie: the work is 450 frames
+    long and genuinely measurable, and a phone doing it in eight seconds needs
+    to be told that eight seconds is the deal.
+  */
+  .pano .psv-button.pano-reel[data-reel-state='working'] {
+    pointer-events: none;
+    color: hsl(var(--chrome-accent));
+    background:
+      conic-gradient(
+        hsl(var(--chrome-accent) / 0.4) calc(var(--pano-reel-progress, 0) * 360deg),
+        rgb(255 255 255 / 0.08) 0
+      );
+  }
+
+  .pano .psv-button.pano-reel[data-reel-state='done'] {
+    color: hsl(var(--chrome-accent));
+  }
+
+  .pano .pano-reel .reel-icon__play {
     transition: opacity 180ms ease;
   }
 
@@ -797,6 +833,53 @@ const {
     if (controls) button.setAttribute("aria-controls", controls);
   }
 
+  /*
+    The reel button. A 9:16 frame with a play triangle inside it, drawn at the
+    same weight as the summits glyph so the pill still reads as one set.
+  */
+  const REEL_BUTTON_ID = "reel";
+
+  const REEL_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/>' +
+    '<path class="reel-icon__play" d="M10.5 8.5v7l5.5-3.5z" fill="currentColor" stroke-linecap="round"/>' +
+    "</svg>";
+
+  /** Nothing to offer → rendering → the file has been handed over. */
+  type ReelState = "idle" | "working" | "done";
+
+  const REEL_LABEL: Record<ReelState, string> = {
+    idle: "Save a 15-second story video of this panorama",
+    working: "Rendering the story video",
+    done: "Story video saved. Render it again.",
+  };
+
+  /**
+   * Whether the button belongs on the pill, and what it is doing.
+   *
+   * Availability is the page's call for the same reason the summits button's
+   * is: a browser without WebCodecs cannot produce an H.264 file at all, and
+   * the check is asynchronous, so the button ships hidden and appears only once
+   * something has confirmed it would work.
+   */
+  function paintReelButton(el: PanoElement, viewer: Viewer, available: boolean, state: ReelState, progress: number) {
+    const button = viewer.navbar.getButton(REEL_BUTTON_ID, false)?.container;
+    if (!button) return;
+
+    button.style.display = available ? "" : "none";
+    button.dataset.reelState = state;
+    button.style.setProperty("--pano-reel-progress", String(Math.min(1, Math.max(0, progress))));
+
+    const play = button.querySelector<SVGElement>(".reel-icon__play");
+    if (play) play.style.opacity = state === "working" ? "0.35" : "1";
+
+    const percent = state === "working" ? ` ${Math.round(progress * 100)}%` : "";
+    button.setAttribute("aria-label", `${REEL_LABEL[state]}${percent}`);
+    // A progress bar in name only — the disc is the visual, and this is what
+    // makes the same information reach a screen reader.
+    button.setAttribute("aria-busy", String(state === "working"));
+  }
+
   /**
    * The observer and a `pano:load` event can both ask for the same element, and
    * `build` awaits the library — so a `_panoViewer` check alone leaves a window
@@ -1082,6 +1165,19 @@ const {
                   },
                 ]
               : []),
+            // Same corner of the pill as summits: both are things you do *to*
+            // the panorama. Starts hidden — see `paintReelButton`.
+            ...(el.dataset.reel === "true"
+              ? [
+                  {
+                    id: REEL_BUTTON_ID,
+                    content: REEL_ICON,
+                    className: "pano-reel",
+                    onClick: () =>
+                      document.dispatchEvent(new CustomEvent("pano:reel", { detail: { target: `#${el.id}` } })),
+                  },
+                ]
+              : []),
             "gyroscope",
             "fullscreen",
           ],
@@ -1125,6 +1221,9 @@ const {
 
     // Same for summits: hidden until the page has coordinates to justify it.
     if (el.dataset.peaks === "true") paintPeaksButton(el, viewer, false, "off");
+
+    // And for the reel, until something has confirmed this browser can encode.
+    if (el.dataset.reel === "true") paintReelButton(el, viewer, false, "idle", 0);
 
     /*
       Reveal the stage on the first texture rather than only on `ready`.
@@ -1335,6 +1434,23 @@ const {
     if (!viewer) return;
 
     paintPeaksButton(el, viewer, available, state ?? "off", controls);
+  });
+
+  /** The other half of `pano:reel`: the page reporting on the render it started. */
+  document.addEventListener("pano:reel-button", async (event: Event) => {
+    const { target, available, state, progress } = (event as CustomEvent).detail as {
+      target: string;
+      available: boolean;
+      state?: ReelState;
+      progress?: number;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    const viewer = (await el._panoBoot) ?? el._panoViewer;
+    if (!viewer) return;
+
+    paintReelButton(el, viewer, available, state ?? "idle", progress ?? 0);
   });
 
   // Let other scripts (the gallery's lightbox) drive a viewer directly.
