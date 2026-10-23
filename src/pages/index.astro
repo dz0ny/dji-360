@@ -92,6 +92,10 @@ const schema: WithContext<ImageGallery> = {
       </p>
     </div>
 
+    {/* Filters: by year, and by the light at the moment of capture. Built once
+        the archive loads, because the years and the lights come from it. */}
+    <div class="-mt-2 mb-6 flex flex-wrap gap-2" data-filters role="group" aria-label="Filter the archive" hidden></div>
+
     {/* Skeleton — replaced wholesale once the API responds. */}
     <div class="grid gap-[var(--spacing-gutter)] sm:grid-cols-2 xl:grid-cols-3" data-gallery>
       <div class="aspect-pano animate-pulse rounded-lg bg-muted sm:col-span-2 xl:col-span-2"></div>
@@ -114,6 +118,10 @@ const schema: WithContext<ImageGallery> = {
       </div>
     </div>
 
+    <p class="hidden py-16 text-center text-sm text-muted-foreground" data-gallery-none>
+      Nothing matches. Clear a filter to see more.
+    </p>
+
     <p class="hidden text-sm text-destructive" data-gallery-error role="alert"></p>
   </section>
 </Layout>
@@ -129,11 +137,14 @@ const schema: WithContext<ImageGallery> = {
     viewUrl,
     type Photo,
   } from "@/lib/photos";
+  import { lightOf, sunPosition } from "@/lib/sun";
 
   const gallery = document.querySelector<HTMLElement>("[data-gallery]");
   const empty = document.querySelector<HTMLElement>("[data-gallery-empty]");
   const errorBox = document.querySelector<HTMLElement>("[data-gallery-error]");
   const hint = document.querySelector<HTMLElement>("[data-archive-hint]");
+  const filtersEl = document.querySelector<HTMLElement>("[data-filters]");
+  const noneEl = document.querySelector<HTMLElement>("[data-gallery-none]");
 
   /**
    * VARIANCE 6: the newest frame takes a double-wide cell so the grid never
@@ -215,8 +226,16 @@ const schema: WithContext<ImageGallery> = {
       poster.classList.remove("opacity-0");
     }
 
+    // The title opens the panorama. The grid below starts at the second photo,
+    // so this link is the gallery's way into the newest one.
     const title = document.querySelector<HTMLElement>("[data-hero-title]");
-    if (title) title.textContent = displayTitle(photo);
+    if (title) {
+      const link = document.createElement("a");
+      link.href = viewUrl(photo.id);
+      link.className = "pointer-events-auto underline-offset-[0.12em] decoration-2 hover:underline";
+      link.textContent = displayTitle(photo);
+      title.replaceChildren(link);
+    }
 
     const eyebrow = document.querySelector<HTMLElement>("[data-hero-eyebrow]");
     const coords = formatCoords(photo);
@@ -280,10 +299,9 @@ const schema: WithContext<ImageGallery> = {
       }
 
       paintHero(photos[0]);
-      gallery.innerHTML = photos.map(card).join("");
-      coverFallback(gallery);
-      observeReveals(gallery);
-      if (hint) hint.textContent = `${photos.length} panorama${photos.length === 1 ? "" : "s"}`;
+      archive = photos;
+      renderFilters();
+      renderGallery();
     } catch (error) {
       gallery.classList.add("hidden");
       if (hint) hint.textContent = "Unavailable";
@@ -291,6 +309,105 @@ const schema: WithContext<ImageGallery> = {
         errorBox.textContent = error instanceof Error ? error.message : "Could not load the archive.";
         errorBox.classList.remove("hidden");
       }
+    }
+  }
+
+  // --- filters ---------------------------------------------------------------
+
+  type Light = "Golden hour" | "Blue hour";
+  const LIGHT_PARAM: Record<Light, string> = { "Golden hour": "golden", "Blue hour": "blue" };
+
+  let archive: Photo[] = [];
+  const params = new URLSearchParams(window.location.search);
+  let year: string | null = params.get("year");
+  let light: Light | null =
+    (Object.keys(LIGHT_PARAM) as Light[]).find((key) => LIGHT_PARAM[key] === params.get("light")) ?? null;
+
+  /** The light in the frame, from the sun at the moment of capture. */
+  function lightOfPhoto(photo: Photo): Light | null {
+    if (!photo.capturedAt || photo.lat == null || photo.lon == null) return null;
+    return lightOf(sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon).elevation);
+  }
+
+  function yearOf(photo: Photo): string | null {
+    const date = photoDate(photo);
+    return date ? String(date.getFullYear()) : null;
+  }
+
+  function matches(photo: Photo): boolean {
+    return (!year || yearOf(photo) === year) && (!light || lightOfPhoto(photo) === light);
+  }
+
+  // The filters live in the query string, so a filtered view can be shared.
+  function writeFilters() {
+    const next = new URLSearchParams();
+    if (year) next.set("year", year);
+    if (light) next.set("light", LIGHT_PARAM[light]);
+    const query = next.toString();
+    history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }
+
+  function chip(label: string, count: number, pressed: boolean, data: string): string {
+    return `
+      <button
+        type="button"
+        aria-pressed="${pressed}"
+        ${data}
+        class="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3.5 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
+      >${escapeHtml(label)}<span class="opacity-60">${count}</span></button>`;
+  }
+
+  // One chip per year and per named light. A chip only appears when at least
+  // one photo has it, so no chip ever leads to an empty grid on its own.
+  function renderFilters() {
+    if (!filtersEl) return;
+    const years = [...new Set(archive.map(yearOf).filter((y): y is string => Boolean(y)))].sort().reverse();
+    const lights = (Object.keys(LIGHT_PARAM) as Light[]).filter((l) => archive.some((p) => lightOfPhoto(p) === l));
+
+    filtersEl.innerHTML = [
+      chip("All", archive.length, !year && !light, "data-filter-all"),
+      ...lights.map((l) =>
+        chip(l, archive.filter((p) => lightOfPhoto(p) === l).length, light === l, `data-filter-light="${l}"`),
+      ),
+      ...years.map((y) =>
+        chip(y, archive.filter((p) => yearOf(p) === y).length, year === y, `data-filter-year="${y}"`),
+      ),
+    ].join("");
+    filtersEl.hidden = archive.length < 2;
+  }
+
+  filtersEl?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button");
+    if (!button) return;
+    if (button.hasAttribute("data-filter-all")) {
+      year = null;
+      light = null;
+    } else if (button.dataset.filterYear) {
+      year = year === button.dataset.filterYear ? null : button.dataset.filterYear;
+    } else if (button.dataset.filterLight) {
+      const next = button.dataset.filterLight as Light;
+      light = light === next ? null : next;
+    }
+    writeFilters();
+    renderFilters();
+    renderGallery();
+  });
+
+  // Unfiltered, the grid starts at the second photo: the newest is the hero
+  // right above it. Filtered, every match shows, the newest included.
+  function renderGallery() {
+    if (!gallery) return;
+    const filtered = Boolean(year || light);
+    const list = filtered ? archive.filter(matches) : archive.length > 1 ? archive.slice(1) : archive;
+
+    gallery.innerHTML = list.map(card).join("");
+    coverFallback(gallery);
+    observeReveals(gallery);
+    noneEl?.classList.toggle("hidden", list.length > 0);
+
+    if (hint) {
+      const total = `${archive.length} panorama${archive.length === 1 ? "" : "s"}`;
+      hint.textContent = filtered ? `${list.length} of ${total}` : total;
     }
   }
 

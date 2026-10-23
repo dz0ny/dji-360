@@ -48,6 +48,8 @@ export interface Photo {
 	 * enough. The Worker never sends this; `fetchPhotos` adds it.
 	 */
 	label?: string;
+	/** The capture time as stored, when `fetchPhotos` corrected it. The admin repair writes the fix back. */
+	storedCapturedAt?: string;
 }
 
 export async function fetchPhotos(): Promise<Photo[]> {
@@ -55,13 +57,15 @@ export async function fetchPhotos(): Promise<Photo[]> {
 	if (!res.ok) throw new Error(`Could not load the archive (${res.status})`);
 	const data = (await res.json()) as { photos?: Photo[] };
 	// Times first: the labels below read the capture time.
-	const photos = (data.photos ?? []).map((photo) => ({
-		...photo,
-		capturedAt:
+	const photos = (data.photos ?? []).map((photo) => {
+		const corrected =
 			correctCapture(photo.capturedAt, photo.originalName, (wall) =>
 				zonedInstant(wall, HOME_TIME_ZONE),
-			) ?? "",
-	}));
+			) ?? "";
+		return corrected === photo.capturedAt
+			? photo
+			: { ...photo, capturedAt: corrected, storedCapturedAt: photo.capturedAt };
+	});
 	return labelSameFlight(photos);
 }
 
@@ -144,6 +148,19 @@ export function displayTitle(photo: Photo): string {
 // store the time in the title for good.
 export function plainTitle(photo: Photo): string {
 	return photo.title || formatDate(photo);
+}
+
+// The drone's name, where its EXIF only carries a camera code.
+
+// Add a code here once its drone is known for sure. An unknown code stays as
+// it is. That is honest, and it still tells two drones apart.
+const CAMERAS: Record<string, string> = {
+	"DJI FC8482": "DJI Mini 4 Pro",
+};
+
+export function cameraName(camera: string | null | undefined): string {
+	if (!camera) return "";
+	return CAMERAS[camera] ?? camera;
 }
 
 /** Text going into `innerHTML` templates — titles are user-supplied. */

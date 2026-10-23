@@ -189,6 +189,15 @@ async function handlePatch(request, env, id) {
 		if (field in patch) next[field] = patch[field] == null ? '' : String(patch[field]);
 	}
 
+	// The admin repair writes a corrected capture time here. The newer drone
+	// stamped its EXIF in China time, and `src/lib/clock.ts` works out the true
+	// instant from the file name. Only a real date goes in, as an ISO string.
+	if ('capturedAt' in patch) {
+		const when = new Date(String(patch.capturedAt ?? ''));
+		if (Number.isNaN(when.getTime())) return fail(400, 'capturedAt must be an ISO date');
+		next.capturedAt = when.toISOString();
+	}
+
 	/*
 	  Heading is the one field the archive can be *taught*: older uploads were
 	  re-encoded before the parser knew to look for it, so the viewer offers an

@@ -135,6 +135,6 @@ describe("scaffold preview server (bun run preview) smoke", () => {
     expect(r.headers.get("content-type") ?? "").toContain("text/html");
     const body = await r.text();
     expect(body).toContain("404");
-    expect(body).toContain("Page not found");
+    expect(body).toContain("Nothing at this heading");
   });
 });

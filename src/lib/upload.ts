@@ -18,7 +18,7 @@ import { type CardFacts, horizonCrop, renderCard } from "@/lib/card";
 import { correctCapture, localInstant } from "@/lib/clock";
 import { buildDerivatives } from "@/lib/derive";
 import { readPanoMetadata } from "@/lib/exif";
-import type { Photo } from "@/lib/photos";
+import { cameraName, type Photo } from "@/lib/photos";
 import { lookupPlace } from "@/lib/place";
 
 export type UploadStage =
@@ -178,7 +178,7 @@ export async function uploadPanorama(
 		capturedAt: meta.capturedAt,
 		lat: meta.lat,
 		lon: meta.lon,
-		camera: meta.camera,
+		camera: cameraName(meta.camera),
 	};
 
 	const { archive, large, preview, cover, thumb, sourceWidth, sourceHeight } =
@@ -280,7 +280,7 @@ export async function refreshCard(photo: Photo): Promise<void> {
 			capturedAt: photo.capturedAt,
 			lat: photo.lat,
 			lon: photo.lon,
-			camera: photo.camera,
+			camera: cameraName(photo.camera),
 		});
 
 		await put(
@@ -291,6 +291,20 @@ export async function refreshCard(photo: Photo): Promise<void> {
 		);
 	} finally {
 		bitmap.close();
+	}
+}
+
+/** Write a corrected capture time back to the record. */
+export async function saveCaptureTime(id: string, capturedAt: string): Promise<void> {
+	const res = await fetch(`${API.photos}/${encodeURIComponent(id)}`, {
+		method: "PATCH",
+		credentials: "include",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ capturedAt }),
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => null);
+		throw new Error(body?.error ?? `Could not save the time (${res.status})`);
 	}
 }
 

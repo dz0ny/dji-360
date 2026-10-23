@@ -134,6 +134,8 @@ import PanoViewer from "@/components/PanoViewer.astro";
           data-peaks-heading
         />
         <div class="mt-2 flex items-center gap-2">
+          {/* Tap the sun on the sphere, and its known bearing sets north. */}
+          <button type="button" class="view-chip" data-peaks-sun aria-pressed="false">☀ From sun</button>
           <button type="submit" class="view-chip flex-1 justify-center">Save north</button>
           <span class="font-mono text-[0.5rem] uppercase tracking-[0.14em] text-white/40" data-peaks-save-status></span>
         </div>
@@ -253,6 +255,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
 <script>
   import { API, SITE_NAME } from "@/config";
   import {
+    cameraName,
     displayTitle,
     fetchPhotos,
     formatBytes,
@@ -268,8 +271,11 @@ import PanoViewer from "@/components/PanoViewer.astro";
     fetchPeaks,
     fetchTerrain,
     formatDistance,
+    GROUND_REACH,
     groundAt,
+    groundHides,
     horizonAngle,
+    normalizeDegrees,
     placePeaks,
     placePoint,
     spherePosition,
@@ -306,6 +312,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
   const headingInput = document.querySelector<HTMLInputElement>("[data-peaks-heading]");
   const headingOut = document.querySelector<HTMLOutputElement>("[data-peaks-heading-out]");
   const saveStatusEl = document.querySelector<HTMLElement>("[data-peaks-save-status]");
+  const sunButton = document.querySelector<HTMLButtonElement>("[data-peaks-sun]");
   const reelOpenEl = document.querySelector<HTMLButtonElement>("[data-reel-open]");
   const reelFormatsEl = document.querySelector<HTMLElement>("[data-reel-formats]");
   const reelCancelEl = document.querySelector<HTMLButtonElement>("[data-reel-cancel]");
@@ -419,7 +426,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
         photo.capturedAt && photo.lat != null && photo.lon != null
           ? lightOf(sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon).elevation)
           : null;
-      metaEl.textContent = [formatDate(photo), light, formatCoords(photo), photo.camera, formatBytes(photo.bytes)]
+      metaEl.textContent = [formatDate(photo), light, formatCoords(photo), cameraName(photo.camera), formatBytes(photo.bytes)]
         .filter(Boolean)
         .join(" · ");
       const map = mapUrl(photo);
@@ -626,6 +633,10 @@ import PanoViewer from "@/components/PanoViewer.astro";
         point: placePoint(from, { lat: other.lat!, lon: other.lon!, ele: heightOf(other) }, eye),
       }))
       .filter(({ point }) => point.distance <= NEIGHBOUR_RADIUS)
+      // A drone behind a hill is not in view, so its arrow would point at rock.
+      .filter(
+        ({ point }) => !groundRing || !groundHides(groundRing, point, eye, point.distance * GROUND_REACH),
+      )
       .sort((a, b) => a.point.distance - b.point.distance)
       .slice(0, NEIGHBOUR_LIMIT)
       .map(({ other, point }) => ({
@@ -645,6 +656,9 @@ import PanoViewer from "@/components/PanoViewer.astro";
     if (!photo.capturedAt || photo.lat == null || photo.lon == null) return [];
     const sun = sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon);
     if (sun.elevation < horizonAngle(eye)) return [];
+    // Behind a ridge the sun lights the sky, but the disc is not in the frame.
+    const direction = { bearing: sun.bearing, angle: sun.elevation };
+    if (groundRing && groundHides(groundRing, direction, eye, Number.POSITIVE_INFINITY)) return [];
     return [
       {
         id: "place-sun",
@@ -767,6 +781,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
     peaksState = "labels";
     applyPeaksState();
     if (calibrateEl) calibrateEl.hidden = !isAdmin;
+    paintSunButton();
     if (headingInput) headingInput.value = String(Math.round(photo.heading ?? 0));
     setStatus("Looking up summits…");
 
@@ -805,6 +820,50 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
     setHeading(photo.heading);
   }
+
+  // --- north from the sun ---------------------------------------------------
+
+  // The sun's bearing at the moment of capture is known to a fraction of a
+  // degree. Tap the sun on the sphere, and the tap's yaw plus the heading must
+  // equal that bearing. One tap fixes north on a frame that has none.
+  let pickingSun = false;
+
+  function sunOf(photo: Photo | null) {
+    if (!photo?.capturedAt || photo.lat == null || photo.lon == null) return null;
+    const sun = sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon);
+    // Below the horizon there is no disc to tap.
+    return sun.elevation > -1 ? sun : null;
+  }
+
+  function paintSunButton() {
+    if (!sunButton) return;
+    pickingSun = false;
+    sunButton.setAttribute("aria-pressed", "false");
+    const sun = sunOf(current);
+    sunButton.disabled = !sun;
+    sunButton.title = sun ? "Tap this, then tap the sun on the sphere" : "The sun was below the horizon";
+  }
+
+  sunButton?.addEventListener("click", () => {
+    if (!sunOf(current)) return;
+    pickingSun = !pickingSun;
+    sunButton.setAttribute("aria-pressed", String(pickingSun));
+    if (saveStatusEl) saveStatusEl.textContent = pickingSun ? "Tap the sun" : "";
+  });
+
+  document.addEventListener("pano:click", (event: Event) => {
+    if (!pickingSun) return;
+    const sun = sunOf(current);
+    if (!sun) return;
+    const { yaw } = (event as CustomEvent).detail as { yaw: number; pitch: number };
+
+    pickingSun = false;
+    sunButton?.setAttribute("aria-pressed", "false");
+    const value = normalizeDegrees(sun.bearing - (yaw * 180) / Math.PI);
+    if (headingInput) headingInput.value = String(Math.round(value));
+    setHeading(value);
+    if (saveStatusEl) saveStatusEl.textContent = "Set from the sun · save to keep";
+  });
 
   // Dragging previews the alignment live: the labels swing across the sphere and
   // you stop when they sit on the summits. Far quicker than typing a number.
