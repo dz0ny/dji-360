@@ -404,9 +404,22 @@ const {
     transition: opacity 140ms ease;
   }
 
-  /* Muted by the on-screen collision pass; the stem below it stays. */
+  /*
+    Muted by the on-screen collision pass. The stem and its dot go too.
+
+    A label is muted because its plate lands on a kept one. So its stem rises
+    straight into that kept plate, and reads as a second pin of the wrong
+    summit. Three stems under VEJE on Mali vrhek were exactly that.
+
+    `visibility`, not `display`: the marker keeps its size, so the anchor at
+    the foot of the stem stays on the summit when the label comes back.
+  */
   .pano .peak-pin__plate--crowded {
     opacity: 0;
+  }
+
+  .pano .peak-pin__plate--crowded + .peak-pin__stem {
+    visibility: hidden;
   }
 
   .pano .peak-pin__name {
@@ -866,8 +879,8 @@ const {
    * zoom — the same ridge is comfortable at 40° of field and a solid wall of text
    * at 100°. So the last word is taken here, on screen, every time the view
    * moves: walk the labels most striking summit first, and mute any whose plate
-   * would land on one already kept. The stem and its dot stay, so a muted label
-   * still reads as "a named summit, there" rather than vanishing outright.
+   * would land on one already kept. A muted label hides its stem and dot as
+   * well (see `.peak-pin__plate--crowded` in the styles).
    */
   function watchForCollisions(viewer: Viewer, el: PanoElement) {
     /** Breathing room between two plates, in pixels. */
