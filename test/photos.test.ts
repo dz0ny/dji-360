@@ -63,7 +63,8 @@ describe("fetchPhotos", () => {
 describe("cameraName", () => {
 	test("names a known drone and passes an unknown code through", () => {
 		expect(cameraName("DJI FC8482")).toBe("DJI Mini 4 Pro");
-		expect(cameraName("DJI FC9313")).toBe("DJI FC9313");
+		expect(cameraName("DJI FC9313")).toBe("DJI Mini 5 Pro");
+		expect(cameraName("DJI FC0000")).toBe("DJI FC0000");
 		expect(cameraName("")).toBe("");
 	});
 });

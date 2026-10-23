@@ -156,6 +156,8 @@ export function plainTitle(photo: Photo): string {
 // it is. That is honest, and it still tells two drones apart.
 const CAMERAS: Record<string, string> = {
 	"DJI FC8482": "DJI Mini 4 Pro",
+	// The owner named this one. It is the drone with the China-time clock.
+	"DJI FC9313": "DJI Mini 5 Pro",
 };
 
 export function cameraName(camera: string | null | undefined): string {
