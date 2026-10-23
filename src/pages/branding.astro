@@ -34,17 +34,20 @@ const DIRECTIONS: Direction[] = [
 		dials: "VARIANCE 6 · MOTION 5 · DENSITY 3",
 		scheme: "Triadic (one leg held in reserve) · cool blue-slate near-black",
 		fonts: "Bricolage Grotesque 800 / Public Sans 300–700 / JetBrains Mono",
-		signature: "Split-stage hero — live sphere behind a bottom-left title and a monospace stat rail",
+		signature:
+			"Split-stage hero — live sphere behind a bottom-left title and a monospace stat rail",
 	},
 	{
 		id: "paper-sky",
 		name: "Paper Sky",
-		concept: "Gallery print on paper. The page supplies no colour; the photograph supplies all of it.",
+		concept:
+			"Gallery print on paper. The page supplies no colour; the photograph supplies all of it.",
 		language: "Minimalist + Elegant",
 		dials: "VARIANCE 4 · MOTION 3 · DENSITY 2",
 		scheme: "Complementary · near-white ground, single cobalt accent",
 		fonts: "Fraunces 300–700 / Public Sans 300–700",
-		signature: "Full-bleed plate with generous margin — the image floats, type stays out of the way",
+		signature:
+			"Full-bleed plate with generous margin — the image floats, type stays out of the way",
 	},
 ];
 
@@ -222,4 +225,72 @@ const SWATCHES = [
       </section>
     ))
   }
+
+  <section class="mx-auto max-w-5xl px-[var(--spacing-gutter)] py-[var(--spacing-section)]">
+    <h2 class="font-display text-2xl font-extrabold tracking-tight">Share card</h2>
+    <p class="mt-2 max-w-prose text-sm text-muted-foreground">
+      What a feed shows for <code class="font-mono text-xs">/p/&lt;id&gt;/</code>. The same
+      <code class="font-mono text-xs">drawCard</code> that every upload runs paints this one, from the sample
+      panorama. One card is one scraper's whole impression of the archive, so it lives here beside the tokens it
+      uses.
+    </p>
+
+    <canvas
+      data-card-preview
+      width="1200"
+      height="630"
+      class="mt-6 w-full rounded-[var(--radius)] border border-border shadow-soft"
+    ></canvas>
+
+    <p class="mt-8 max-w-prose text-sm text-muted-foreground">
+      The hard case: a name in latin-ext that runs past two lines, on a panorama the camera dated and
+      placed nowhere. The name takes an ellipsis, and the bottom row stays reserved so the badge keeps
+      its corner.
+    </p>
+
+    <canvas
+      data-card-preview-long
+      width="1200"
+      height="630"
+      class="mt-4 w-full rounded-[var(--radius)] border border-border shadow-soft"
+    ></canvas>
+  </section>
 </Layout>
+
+<script>
+  // The card draws on a real canvas with the real fonts of the site. A mock-up
+  // in CSS would drift from the code that scrapers actually see.
+  import { drawCard, horizonCrop } from "@/lib/card";
+  import samplePano from "@/assets/sample-pano.jpg";
+
+  const typical = document.querySelector<HTMLCanvasElement>("[data-card-preview]");
+  const long = document.querySelector<HTMLCanvasElement>("[data-card-preview-long]");
+
+  if (typical && long) {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = samplePano.src;
+
+    void (async () => {
+      await image.decode();
+      // The faces load through the Fonts API of Astro, and canvas never waits
+      // for them. `document.fonts.ready` settles once the page has them.
+      await document.fonts.ready;
+
+      const crop = horizonCrop(image.naturalWidth, image.naturalHeight);
+
+      drawCard(typical, image, crop, {
+        title: "Ljubljana marshes",
+        capturedAt: "2026-05-18T07:41:00Z",
+        lat: 45.9612,
+        lon: 14.3881,
+        camera: "DJI Mavic 3 Pro",
+      });
+
+      drawCard(long, image, crop, {
+        title:
+          "Šmarna gora nad Ljubljansko kotlino, pogled proti Kamniškim Alpam in čez Savo proti Gorenjski",
+      });
+    })();
+  }
+</script>

@@ -70,7 +70,14 @@ import Layout from "@/layouts/Layout.astro";
 
 <script>
   import { displayTitle, escapeHtml, fetchPhotos, formatBytes, formatDate, viewUrl, type Photo } from "@/lib/photos";
-  import { deletePanorama, renamePanorama, uploadPanorama, whoami, type UploadStage } from "@/lib/upload";
+  import {
+    deletePanorama,
+    refreshCard,
+    renamePanorama,
+    uploadPanorama,
+    whoami,
+    type UploadStage,
+  } from "@/lib/upload";
   import { lookupPlace } from "@/lib/place";
 
   const gate = document.querySelector<HTMLElement>("[data-gate]");
@@ -185,6 +192,10 @@ import Layout from "@/layouts/Layout.astro";
 
   /* --------------------------------------------------------------- manage */
 
+  // The rows that are on screen now, by id. Redrawing a card needs the facts
+  // of the panorama, and the row markup only carries what it displays.
+  let known = new Map<string, Photo>();
+
   function manageRow(photo: Photo): string {
     const title = escapeHtml(displayTitle(photo));
     const located = photo.lat != null && photo.lon != null;
@@ -229,6 +240,13 @@ import Layout from "@/layouts/Layout.astro";
           >Geo</button>
           <button
             type="button"
+            data-card
+            class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Redraw the share card for ${title}"
+            title="Redraw the share card"
+          >Card</button>
+          <button
+            type="button"
             data-delete
             class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
             aria-label="Delete ${title}"
@@ -241,6 +259,7 @@ import Layout from "@/layouts/Layout.astro";
     if (!manage) return;
     try {
       const photos = await fetchPhotos();
+      known = new Map(photos.map((photo) => [photo.id, photo]));
       manage.innerHTML = photos.map(manageRow).join("");
       if (manageHint) {
         manageHint.textContent = photos.length
@@ -263,13 +282,52 @@ import Layout from "@/layouts/Layout.astro";
     const id = row?.dataset.row;
     if (!row || !id) return;
 
+    // A card that still shows the old title is worse than no card, so a rename
+    // and the card go together. The card goes first: `worker/pano.js` hangs the
+    // timestamp of the thumb on the og:image URL, and the rename moves that
+    // timestamp. A scraper in the gap would cache the old pixels under the new
+    // address and keep them.
+    const redraw = async (title: string) => {
+      const photo = known.get(id);
+      if (photo) await refreshCard({ ...photo, title });
+    };
+
     if (target.closest("[data-rename]")) {
       const current = row.querySelector("p")?.textContent?.trim() ?? "";
       const next = window.prompt("Title", current);
       if (next === null) return;
-      void renamePanorama(id, next)
+      void redraw(next.trim())
+        .then(() => renamePanorama(id, next))
         .then(loadManage)
         .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Rename failed"));
+      return;
+    }
+
+    if (target.closest("[data-card]")) {
+      const button = target.closest<HTMLButtonElement>("[data-card]");
+      const photo = known.get(id);
+      if (!button || !photo) return;
+
+      // Decoding a 4096px panorama takes a second or two on a phone.
+      button.disabled = true;
+      button.textContent = "…";
+
+      // The PATCH that follows writes the title back unchanged. `handlePatch`
+      // re-puts the thumb either way, which moves its timestamp, which moves
+      // the og:image URL. Without it a scraper keeps the card it already has,
+      // and this button is the one path for photos that are already in R2.
+      void refreshCard(photo)
+        .then(() => renamePanorama(id, photo.title))
+        .then(() => {
+          button.textContent = "Done";
+        })
+        .catch((error: unknown) => {
+          button.textContent = "Card";
+          showFatal(error instanceof Error ? error.message : "Could not redraw the card");
+        })
+        .finally(() => {
+          if (button.isConnected) button.disabled = false;
+        });
       return;
     }
 
@@ -293,7 +351,9 @@ import Layout from "@/layouts/Layout.astro";
           // Confirmed rather than applied: the geocoder picks the nearest named
           // thing, which is not always the thing the photo is of.
           if (!window.confirm(`Name this "${place.name}"?\n\n${place.display}`)) return;
-          return renamePanorama(id, place.name).then(loadManage);
+          return redraw(place.name)
+            .then(() => renamePanorama(id, place.name))
+            .then(loadManage);
         })
         .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Could not name it"))
         .finally(() => {
