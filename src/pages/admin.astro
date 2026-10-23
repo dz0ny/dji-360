@@ -56,9 +56,21 @@ import Layout from "@/layouts/Layout.astro";
       <div class="mt-12">
         <div class="flex items-baseline justify-between gap-4 border-b border-border/70 pb-4">
           <h2 class="font-display text-lg font-extrabold tracking-tight sm:text-xl">In the archive</h2>
-          <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
-            Loading
-          </p>
+          <div class="flex items-baseline gap-4">
+            {/*
+              Every panorama uploaded before the branded card has a plain crop
+              stored as WebP, which most feed scrapers refuse. This walks the
+              whole archive and redraws each one.
+            */}
+            <button
+              type="button"
+              data-redraw-all
+              class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-40"
+            >Redraw all</button>
+            <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
+              Loading
+            </p>
+          </div>
         </div>
         <ul class="divide-y divide-border/70" data-manage></ul>
       </div>
@@ -90,6 +102,7 @@ import Layout from "@/layouts/Layout.astro";
   const queue = document.querySelector<HTMLElement>("[data-queue]");
   const manage = document.querySelector<HTMLElement>("[data-manage]");
   const manageHint = document.querySelector<HTMLElement>("[data-manage-hint]");
+  const redrawAllButton = document.querySelector<HTMLButtonElement>("[data-redraw-all]");
   const fatal = document.querySelector<HTMLElement>("[data-fatal]");
 
   const STAGE_LABEL: Record<UploadStage, string> = {
@@ -272,6 +285,62 @@ import Layout from "@/layouts/Layout.astro";
     }
   }
 
+  // Redraw one stored card, then touch the record.
+
+  // `worker/pano.js` hangs the timestamp of the thumb on the og:image URL, and
+  // `handlePatch` re-puts the thumb for any PATCH. So writing the title back
+  // unchanged moves the address, and a scraper that holds the old card asks
+  // again. Without it the cover key never changes and the card stays cached.
+  async function redrawStored(photo: Photo): Promise<void> {
+    await refreshCard(photo);
+    await renamePanorama(photo.id, photo.title);
+  }
+
+  // Walk the whole archive, one panorama at a time.
+
+  // Sequential, like the upload queue. Each pass decodes a 4096px panorama,
+  // which is about 34 MB of bitmap, and a phone that decodes five at once dies.
+
+  // One failure never stops the sweep. A photo with a broken preview must not
+  // cost the other twenty-nine their cards.
+  async function redrawAll() {
+    if (busy || !redrawAllButton) return;
+
+    const photos = [...known.values()];
+    if (!photos.length) return;
+    if (!window.confirm(`Redraw the share card for ${photos.length} panoramas? This takes a while.`)) return;
+
+    busy = true;
+    redrawAllButton.disabled = true;
+    const label = redrawAllButton.textContent;
+
+    let done = 0;
+    const failed: string[] = [];
+
+    for (const photo of photos) {
+      redrawAllButton.textContent = `${done + 1} of ${photos.length}`;
+      try {
+        await redrawStored(photo);
+        done++;
+      } catch {
+        failed.push(displayTitle(photo));
+      }
+    }
+
+    busy = false;
+    redrawAllButton.disabled = false;
+    redrawAllButton.textContent = label;
+
+    if (failed.length) {
+      showFatal(`${done} of ${photos.length} redrawn. These failed: ${failed.join(", ")}`);
+    }
+    void loadManage();
+  }
+
+  redrawAllButton?.addEventListener("click", () => {
+    void redrawAll();
+  });
+
   /**
    * `prompt`/`confirm` are the one place a modal dialog is the honest control:
    * a rename is a single field and a delete is irreversible.
@@ -312,12 +381,7 @@ import Layout from "@/layouts/Layout.astro";
       button.disabled = true;
       button.textContent = "…";
 
-      // The PATCH that follows writes the title back unchanged. `handlePatch`
-      // re-puts the thumb either way, which moves its timestamp, which moves
-      // the og:image URL. Without it a scraper keeps the card it already has,
-      // and this button is the one path for photos that are already in R2.
-      void refreshCard(photo)
-        .then(() => renamePanorama(id, photo.title))
+      void redrawStored(photo)
         .then(() => {
           button.textContent = "Done";
         })
