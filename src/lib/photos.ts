@@ -5,7 +5,8 @@
  * fetched at runtime from the Worker rather than baked into the HTML.
  */
 
-import { API } from "@/config";
+import { API, HOME_TIME_ZONE } from "@/config";
+import { correctCapture, zonedInstant } from "@/lib/clock";
 
 export interface Photo {
 	id: string;
@@ -53,7 +54,15 @@ export async function fetchPhotos(): Promise<Photo[]> {
 	const res = await fetch(API.photos, { headers: { Accept: "application/json" } });
 	if (!res.ok) throw new Error(`Could not load the archive (${res.status})`);
 	const data = (await res.json()) as { photos?: Photo[] };
-	return labelSameFlight(data.photos ?? []);
+	// Times first: the labels below read the capture time.
+	const photos = (data.photos ?? []).map((photo) => ({
+		...photo,
+		capturedAt:
+			correctCapture(photo.capturedAt, photo.originalName, (wall) =>
+				zonedInstant(wall, HOME_TIME_ZONE),
+			) ?? "",
+	}));
+	return labelSameFlight(photos);
 }
 
 // Tell apart the shots of one flight.

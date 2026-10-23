@@ -12,6 +12,11 @@ export const SITE_DESCRIPTION =
 	"A personal archive of 360° aerial panoramas shot on DJI drones. Drag, pinch, or tilt your phone to look around.";
 export const SITE_URL = "https://dji.dz0ny.dev";
 
+// The zone of the phone that flew, and of the browser that uploaded. Every
+// capture time in the archive went through it. `src/lib/clock.ts` needs it to
+// read the stored times back as the wall clock they came from.
+export const HOME_TIME_ZONE = "Europe/Ljubljana";
+
 /**
  * Default link-preview card, 1200×630. Lives in `public/` because scrapers need
  * a stable URL and never run the hashing that `astro:assets` applies.
@@ -48,6 +53,8 @@ export const API = {
 	whoami: "/~/api/whoami",
 	/** `/~/api/peaks/<id>` — named summits around one panorama, cached in R2. */
 	peaks: "/~/api/peaks",
+	/** `/~/api/terrain/<id>` — ground heights around one panorama, cached in R2. */
+	terrain: "/~/api/terrain",
 	/** `/~/api/place?lat=&lon=` — what to call a spot. Access-gated, cached in R2. */
 	place: "/~/api/place",
 	/** `/~/api/upload/<id>/<thumb|cover|preview|large|original>/` */

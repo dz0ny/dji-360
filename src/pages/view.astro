@@ -78,6 +78,10 @@ import PanoViewer from "@/components/PanoViewer.astro";
         >
           <span aria-hidden="true">▶</span> Reel
         </button>
+
+        {/* Then and now: the same place on another date. A tap swaps the
+            panorama and keeps the camera on the same compass bearing. */}
+        <div class="contents" data-then-now role="group" aria-label="This place on other dates"></div>
       </div>
 
       <div id="reel-formats" class="mt-1.5 flex flex-wrap items-center gap-1.5 px-3" data-reel-formats hidden>
@@ -162,8 +166,15 @@ import PanoViewer from "@/components/PanoViewer.astro";
 </Layout>
 
 <style>
-  /* One pill shape for every control in the top bar, so the row reads as a set. */
-  .view-chip {
+  /*
+    One pill shape for every control in the top bar, so the row reads as a set.
+
+    The then-and-now chips are built in script, so they never get the scoped
+    attribute. `:global` inside their container reaches them, and keeps one
+    definition of the pill.
+  */
+  .view-chip,
+  [data-then-now] :global(.view-chip) {
     display: inline-flex;
     /* The gradient behind them is click-through; the controls are not. */
     pointer-events: auto;
@@ -182,7 +193,8 @@ import PanoViewer from "@/components/PanoViewer.astro";
     transition: background-color 200ms ease;
   }
 
-  .view-chip:hover {
+  .view-chip:hover,
+  [data-then-now] :global(.view-chip:hover) {
     background: rgb(0 0 0 / 0.7);
   }
 
@@ -240,10 +252,30 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
 <script>
   import { API, SITE_NAME } from "@/config";
-  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl, plainTitle } from "@/lib/photos";
+  import {
+    displayTitle,
+    fetchPhotos,
+    formatBytes,
+    formatCoords,
+    formatDate,
+    mapUrl,
+    photoDate,
+    plainTitle,
+  } from "@/lib/photos";
   import type { Photo } from "@/lib/photos";
-  import { fetchPeaks, formatDistance, placePeaks, spherePosition } from "@/lib/peaks";
-  import type { PeaksPayload, PlacedPeak } from "@/lib/peaks";
+  import {
+    eyeElevation,
+    fetchPeaks,
+    fetchTerrain,
+    formatDistance,
+    groundAt,
+    horizonAngle,
+    placePeaks,
+    placePoint,
+    spherePosition,
+  } from "@/lib/peaks";
+  import { lightOf, sunPosition } from "@/lib/sun";
+  import type { PeaksPayload, PlacedPeak, TerrainRing } from "@/lib/peaks";
   import { canRenderReel, reelFilename, renderReel, saveReel, REEL_FORMATS } from "@/lib/reel";
   import type { ReelFormat } from "@/lib/reel";
 
@@ -266,6 +298,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
   const errorEl = document.querySelector<HTMLElement>("[data-view-error]");
   const prevEl = document.querySelector<HTMLButtonElement>("[data-view-prev]");
   const nextEl = document.querySelector<HTMLButtonElement>("[data-view-next]");
+  const thenNowEl = document.querySelector<HTMLElement>("[data-then-now]");
   const panelEl = document.querySelector<HTMLElement>("#peaks-panel");
   const peaksListEl = document.querySelector<HTMLElement>("[data-peaks-list]");
   const peaksStatusEl = document.querySelector<HTMLElement>("[data-peaks-status]");
@@ -296,6 +329,11 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
   let peaksAvailable = false;
   let peaksState: PeaksState = "labels";
+  // The camera height and the ground ring of the panorama on screen. The peak
+  // lookup sets both. The arrows and the sun read them.
+  let eyeHeight: number | null = null;
+  let groundRing: TerrainRing | null = null;
+
   /** The heading being previewed, which is the stored one until an admin drags. */
   let heading: number | null = null;
   let isAdmin = false;
@@ -319,10 +357,10 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
   // --- the sphere -----------------------------------------------------------
 
-  function loadSphere(photo: Photo) {
+  function loadSphere(photo: Photo, keepView?: { yawOffset: number }) {
     document.dispatchEvent(
       new CustomEvent("pano:load", {
-        detail: { target: "#stage", src: `${API.img}/preview/${photo.id}` },
+        detail: { target: "#stage", src: `${API.img}/preview/${photo.id}`, keepView },
       }),
     );
     document.dispatchEvent(
@@ -375,7 +413,13 @@ import PanoViewer from "@/components/PanoViewer.astro";
     if (titleEl) titleEl.textContent = title;
 
     if (metaEl) {
-      metaEl.textContent = [formatDate(photo), formatCoords(photo), photo.camera, formatBytes(photo.bytes)]
+      // Golden or blue hour, when the light in the frame has a name. It needs
+      // only the time and the place, not the heading.
+      const light =
+        photo.capturedAt && photo.lat != null && photo.lon != null
+          ? lightOf(sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon).elevation)
+          : null;
+      metaEl.textContent = [formatDate(photo), light, formatCoords(photo), photo.camera, formatBytes(photo.bytes)]
         .filter(Boolean)
         .join(" · ");
       const map = mapUrl(photo);
@@ -409,14 +453,16 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
   // --- moving between panoramas --------------------------------------------
 
-  function show(photo: Photo, { push = false } = {}) {
+  function show(photo: Photo, { push = false, keepView }: { push?: boolean; keepView?: { yawOffset: number } } = {}) {
     current = photo;
     if (push) {
       // A fresh photo deserves a fresh viewpoint, so the old hash goes with it.
+      // Then-and-now keeps the view, and the hash catches up once it lands.
       history.pushState(null, "", `/p/${encodeURIComponent(photo.id)}/`);
     }
-    loadSphere(photo);
+    loadSphere(photo, keepView);
     renderChrome(photo);
+    renderThenNow(photo);
     paintReel();
     void loadPeaks(photo);
   }
@@ -544,7 +590,154 @@ import PanoViewer from "@/components/PanoViewer.astro";
         },
       }),
     );
+    applyPlaces();
   }
+
+  // --- places: other panoramas in view, and the sun -------------------------
+
+  /** Far enough to reach the next hill over, near enough to be worth a tap. */
+  const NEIGHBOUR_RADIUS = 5000;
+  const NEIGHBOUR_LIMIT = 8;
+  const PANO_PREFIX = "place-pano-";
+
+  // Other panoramas, drawn where their drone hovered.
+
+  // Three frames of one flight are usually a few hundred metres apart, so a
+  // tap on the arrow walks from one to the next. The marker sits at the other
+  // drone's height, so a frame shot higher up reads as higher in the sky.
+  function neighbourPlaces(photo: Photo, eye: number, north: number) {
+    if (photo.lat == null || photo.lon == null) return [];
+    const from = { lat: photo.lat, lon: photo.lon };
+
+    // The other drone's height: the ground under it from the ring, plus its
+    // height above take-off. The recorded sea-level figure is not to be trusted.
+    const heightOf = (other: Photo) => {
+      const flat = placePoint(from, { lat: other.lat!, lon: other.lon!, ele: eye }, eye);
+      const ground = groundRing ? groundAt(groundRing, flat.bearing, flat.distance) : null;
+      return ground != null && other.altitude != null && other.altitude > 0 && other.altitude <= 500
+        ? ground + other.altitude
+        : eye;
+    };
+
+    return photos
+      .filter((other) => other.id !== photo.id && other.lat != null && other.lon != null)
+      .map((other) => ({
+        other,
+        point: placePoint(from, { lat: other.lat!, lon: other.lon!, ele: heightOf(other) }, eye),
+      }))
+      .filter(({ point }) => point.distance <= NEIGHBOUR_RADIUS)
+      .sort((a, b) => a.point.distance - b.point.distance)
+      .slice(0, NEIGHBOUR_LIMIT)
+      .map(({ other, point }) => ({
+        id: `${PANO_PREFIX}${other.id}`,
+        kind: "panorama" as const,
+        name: displayTitle(other),
+        detail: `${formatDistance(point.distance)} · ${formatDate(other)}`,
+        ...spherePosition(point, north),
+      }));
+  }
+
+  // The sun at the moment of capture, if it stood above the horizon.
+
+  // It doubles as a check on the stored heading. On a frame that shows the sun
+  // or its glare, the disc should sit on it.
+  function sunPlace(photo: Photo, eye: number, north: number) {
+    if (!photo.capturedAt || photo.lat == null || photo.lon == null) return [];
+    const sun = sunPosition(new Date(photo.capturedAt), photo.lat, photo.lon);
+    if (sun.elevation < horizonAngle(eye)) return [];
+    return [
+      {
+        id: "place-sun",
+        kind: "sun" as const,
+        name: "Sun",
+        detail: `Sun · ${Math.round(sun.elevation)}° up`,
+        ...spherePosition({ bearing: sun.bearing, angle: sun.elevation }, north),
+      },
+    ];
+  }
+
+  // Everything that is not a summit. It needs north, as the peak labels do,
+  // and it obeys the same switch: "off" means a clean sphere.
+  function applyPlaces() {
+    const photo = current;
+    const eye = eyeHeight;
+    const places =
+      !photo || heading == null || eye == null || peaksState === "off"
+        ? []
+        : [...sunPlace(photo, eye, heading), ...neighbourPlaces(photo, eye, heading)];
+
+    document.dispatchEvent(new CustomEvent("pano:places", { detail: { target: "#stage", places } }));
+  }
+
+  // --- then and now ---------------------------------------------------------
+
+  /** A different take-off a short walk away still counts as the same place. */
+  const SAME_PLACE_RADIUS = 800;
+  const THEN_NOW_LIMIT = 3;
+
+  // The same place on other days, newest first.
+
+  // Shots from the same day are the flight's own frames, and the arrows on
+  // the sphere already reach those. These chips are for coming back later.
+  function otherVisits(photo: Photo): Photo[] {
+    if (photo.lat == null || photo.lon == null) return [];
+    const from = { lat: photo.lat, lon: photo.lon };
+    const day = photoDate(photo)?.toDateString();
+
+    const byDay = new Map<string, Photo>();
+    for (const other of photos) {
+      if (other.id === photo.id || other.lat == null || other.lon == null) continue;
+      const otherDay = photoDate(other)?.toDateString();
+      if (!otherDay || otherDay === day) continue;
+      const { distance } = placePoint(from, { lat: other.lat, lon: other.lon, ele: 0 }, 0);
+      if (distance > SAME_PLACE_RADIUS) continue;
+      // One chip per day: the nearest frame of that visit.
+      const kept = byDay.get(otherDay);
+      if (!kept || placePoint(from, { lat: kept.lat!, lon: kept.lon!, ele: 0 }, 0).distance > distance) {
+        byDay.set(otherDay, other);
+      }
+    }
+
+    return [...byDay.values()]
+      .sort((a, b) => (photoDate(b)?.getTime() ?? 0) - (photoDate(a)?.getTime() ?? 0))
+      .slice(0, THEN_NOW_LIMIT);
+  }
+
+  function renderThenNow(photo: Photo) {
+    if (!thenNowEl) return;
+    thenNowEl.replaceChildren(
+      ...otherVisits(photo).map((other) => {
+        const date = photoDate(other);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "view-chip";
+        button.dataset.thenNow = other.id;
+        button.textContent = `⇄ ${date ? date.toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "Other visit"}`;
+        button.setAttribute("aria-label", `Same place, ${formatDate(other)}`);
+        return button;
+      }),
+    );
+  }
+
+  // Swap to another visit and keep looking the same way.
+
+  // A bearing B sits at yaw `B − heading` on a sphere. So to keep the same
+  // bearing, the yaw turns by the difference of the two headings. Without both
+  // headings there is no honest correction, and the yaw stays as it is.
+  thenNowEl?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-then-now]");
+    const other = photos.find((p) => p.id === button?.dataset.thenNow);
+    if (!other || !current) return;
+    const yawOffset = current.heading != null && other.heading != null ? current.heading - other.heading : 0;
+    show(other, { push: true, keepView: { yawOffset } });
+  });
+
+  document.addEventListener("pano:place-select", (event: Event) => {
+    const { id } = (event as CustomEvent).detail as { id: string };
+    if (!id.startsWith(PANO_PREFIX)) return;
+    const photo = photos.find((p) => p.id === id.slice(PANO_PREFIX.length));
+    if (photo) show(photo, { push: true });
+  });
 
   function setHeading(value: number | null) {
     heading = value;
@@ -555,6 +748,8 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
   async function loadPeaks(photo: Photo) {
     placed = [];
+    eyeHeight = null;
+    groundRing = null;
     setHeading(photo.heading);
     renderPeakList();
 
@@ -575,6 +770,9 @@ import PanoViewer from "@/components/PanoViewer.astro";
     if (headingInput) headingInput.value = String(Math.round(photo.heading ?? 0));
     setStatus("Looking up summits…");
 
+    // The ground ring loads beside the summits. It never fails the labels.
+    const terrainRequest = fetchTerrain(photo.id);
+
     let payload: PeaksPayload;
     try {
       payload = await fetchPeaks(photo.id);
@@ -586,7 +784,13 @@ import PanoViewer from "@/components/PanoViewer.astro";
     // Another panorama was opened while Overpass was thinking.
     if (current?.id !== photo.id) return;
 
-    placed = placePeaks(payload, { altitude: photo.altitude, altitudeAmsl: photo.altitudeAmsl });
+    const terrain = await terrainRequest;
+    if (current?.id !== photo.id) return;
+
+    const viewpoint = { altitude: photo.altitude, altitudeAmsl: photo.altitudeAmsl, terrain };
+    eyeHeight = eyeElevation(payload, viewpoint);
+    groundRing = terrain;
+    placed = placePeaks(payload, viewpoint);
     if (!placed.length) {
       setStatus("No named summits stand above this horizon.");
     } else if (photo.heading == null) {

@@ -15,6 +15,7 @@
 
 import { verifyAccess } from './access.js';
 import { handlePeaks } from './peaks.js';
+import { handleTerrain } from './terrain.js';
 import { handlePlace } from './place.js';
 
 const KINDS = {
@@ -230,6 +231,10 @@ export async function handleApi(request, env) {
 
 	if (resource === 'peaks' && rest.length === 1) {
 		return handlePeaks(request, env, rest[0]);
+	}
+
+	if (resource === 'terrain' && rest.length === 1) {
+		return handleTerrain(request, env, rest[0]);
 	}
 
 	// Everything past this point mutates the archive.

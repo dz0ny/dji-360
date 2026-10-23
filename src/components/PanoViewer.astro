@@ -414,11 +414,12 @@ const {
     `visibility`, not `display`: the marker keeps its size, so the anchor at
     the foot of the stem stays on the summit when the label comes back.
   */
-  .pano .peak-pin__plate--crowded {
+  .pano .pin-crowded {
     opacity: 0;
   }
 
-  .pano .peak-pin__plate--crowded + .peak-pin__stem {
+  .pano .pin-crowded + .peak-pin__stem,
+  .pano .pin-crowded + .place-pin__stem {
     visibility: hidden;
   }
 
@@ -438,7 +439,18 @@ const {
     color: rgb(255 255 255 / 0.72);
   }
 
+  /*
+    `display: block` is the fix for pins that hung below their summits.
+
+    Photo Sphere Viewer measures a marker once, before `--visible` turns it
+    into a flex column. An inline stem has no height at that moment. So the
+    viewer measured the plate alone and anchored "bottom" 20 to 90px too high.
+    The pin then drew that far below its summit. A block stem has its height
+    in both layouts, and the measure matches what draws.
+  */
   .pano .peak-pin__stem {
+    display: block;
+    margin-inline: auto;
     position: relative;
     width: 1px;
     /*
@@ -461,6 +473,118 @@ const {
     border-radius: 9999px;
     background: hsl(var(--chrome-accent));
     box-shadow: 0 0 6px hsl(var(--chrome-accent) / 0.8);
+  }
+
+  /*
+    Place pins: other panoramas in view, and the sun.
+
+    They borrow the plate of the peak labels so the sphere reads as one set.
+    The accent edge and the arrow mark them as ways out, not captions. They
+    take taps, which a peak label never does.
+  */
+  .pano .place-pin.psv-marker--visible {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .pano .place-pin__plate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.0625rem;
+    /* A finger needs 44px; the plate is the whole target. */
+    min-height: 2.75rem;
+    padding: 0.25rem 0.625rem;
+    border: 1px solid hsl(var(--chrome-accent) / 0.7);
+    border-radius: 9999px;
+    background: color-mix(in srgb, black 66%, transparent);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.45);
+    transition:
+      opacity 140ms ease,
+      background-color 140ms ease;
+  }
+
+  .pano .place-pin:hover .place-pin__plate {
+    background: color-mix(in srgb, hsl(var(--chrome-accent)) 28%, black);
+  }
+
+  .pano .place-pin__name {
+    font-family: var(--type-meta);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #fff;
+  }
+
+  /* Block for the same reason as the peak stem: the measure must include it. */
+  .pano .place-pin__stem {
+    display: block;
+    margin-inline: auto;
+    position: relative;
+    width: 1px;
+    height: 1.5rem;
+    background: hsl(var(--chrome-accent) / 0.8);
+  }
+
+  /* A ring, not the solid dot of a summit: this marks where a drone hovered. */
+  .pano .place-pin__stem::after {
+    content: "";
+    position: absolute;
+    bottom: -4px;
+    left: -4px;
+    width: 9px;
+    height: 9px;
+    border: 2px solid hsl(var(--chrome-accent));
+    border-radius: 9999px;
+    background: rgb(0 0 0 / 0.4);
+  }
+
+  /* A muted place pin stops taking taps along with going invisible. */
+  .pano .place-pin:has(.pin-crowded) {
+    pointer-events: none;
+  }
+
+  /* The sun is a marker, not a button: no edge, no tap. */
+  .pano .place-pin--sun.psv-marker--visible {
+    cursor: default;
+    pointer-events: none;
+  }
+
+  /*
+    The caption hangs below the disc, out of flow. The marker then measures
+    the disc alone, so `anchor: center` puts the disc on the sun.
+  */
+  .pano .place-pin--sun .peak-pin__meta {
+    position: absolute;
+    top: 100%;
+    margin-top: 0.25rem;
+    text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+  }
+
+  .pano .place-pin--sun .place-pin__plate {
+    position: relative;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .pano .place-pin__sun {
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 2px solid rgb(255 214 120 / 0.95);
+    border-radius: 9999px;
+    box-shadow:
+      0 0 14px rgb(255 200 90 / 0.8),
+      inset 0 0 8px rgb(255 214 120 / 0.6);
   }
 
   .pano .psv-caption {
@@ -576,7 +700,7 @@ const {
   import type { Viewer } from "@photo-sphere-viewer/core";
   // Type-only, so these erase at build time and pull in no chunk.
   import type { MapPlugin as MapPluginType } from "@photo-sphere-viewer/map-plugin";
-  import type { MarkersPlugin as MarkersPluginType } from "@photo-sphere-viewer/markers-plugin";
+  import type { MarkerConfig, MarkersPlugin as MarkersPluginType } from "@photo-sphere-viewer/markers-plugin";
 
   /** One texture the sphere can show. `short` is what the quality button reads. */
   type Resolution = { id: string; label: string; short?: string; panorama: string };
@@ -880,7 +1004,7 @@ const {
    * at 100°. So the last word is taken here, on screen, every time the view
    * moves: walk the labels most striking summit first, and mute any whose plate
    * would land on one already kept. A muted label hides its stem and dot as
-   * well (see `.peak-pin__plate--crowded` in the styles).
+   * well (see `.pin-crowded` in the styles).
    */
   function watchForCollisions(viewer: Viewer, el: PanoElement) {
     /** Breathing room between two plates, in pixels. */
@@ -890,7 +1014,7 @@ const {
 
     const resolve = () => {
       queued = false;
-      const entries = Array.from(el.querySelectorAll<HTMLElement>(".peak-pin__plate"))
+      const entries = Array.from(el.querySelectorAll<HTMLElement>(".peak-pin__plate, .place-pin__plate"))
         .map((plate) => ({ plate, rank: Number(plate.dataset.rank ?? 0), rect: plate.getBoundingClientRect() }))
         // A marker outside the field of view is not laid out at all.
         .filter((entry) => entry.rect.width > 0)
@@ -905,7 +1029,7 @@ const {
             entry.rect.top < rect.bottom + GAP &&
             entry.rect.bottom + GAP > rect.top,
         );
-        entry.plate.classList.toggle("peak-pin__plate--crowded", clashes);
+        entry.plate.classList.toggle("pin-crowded", clashes);
         if (!clashes) kept.push(entry.rect);
       }
     };
@@ -1105,6 +1229,13 @@ const {
 
     el._panoViewer = viewer;
 
+    // A tap on a place pin goes back to the page, which knows what the place is.
+    // Peak labels never fire this: their CSS turns pointer events off.
+    viewer.getPlugin<MarkersPluginType>("markers")?.addEventListener("select-marker", ({ marker }) => {
+      if (!marker.id.startsWith("place-")) return;
+      document.dispatchEvent(new CustomEvent("pano:place-select", { detail: { target: `#${el.id}`, id: marker.id } }));
+    });
+
     // The navbar exists as soon as the viewer is constructed; do not wait for
     // `ready`, which never fires if the panorama itself fails to load.
     labelButtons(stage);
@@ -1297,7 +1428,9 @@ const {
 
     watchForCollisions(viewer!, el);
 
-    plugin.setMarkers(
+    replaceMarkerGroup(
+      plugin,
+      "peak-",
       peaks.map((peak) => ({
         id: peak.id,
         position: { yaw: peak.yaw, pitch: peak.pitch },
@@ -1309,6 +1442,59 @@ const {
         anchor: "bottom center",
         // A little give with the field of view, but never so small that the
         // name stops being readable — which is the only reason it is there.
+        scale: { zoom: [0.9, 1.1] },
+      })),
+    );
+  });
+
+  // Swap one group of markers and leave the others alone.
+
+  // Peak labels, arrows to other panoramas and the sun all share one markers
+  // plugin. `setMarkers` replaces every marker, so a heading change that
+  // redraws the peaks would wipe the arrows. Each group owns an id prefix.
+  function replaceMarkerGroup(plugin: MarkersPluginType, prefix: string, configs: MarkerConfig[]) {
+    const stale = plugin
+      .getMarkers()
+      .map((marker) => marker.id)
+      .filter((id) => id.startsWith(prefix));
+    plugin.removeMarkers(stale, false);
+    for (const config of configs) plugin.addMarker(config, false);
+    plugin.renderMarkers();
+  }
+
+  // Places that are not summits: other panoramas in view, and the sun.
+
+  // The page decides what they are and where they sit, as it does for peaks.
+  // The viewer only draws them. A place pin takes taps, unlike a peak label,
+  // and a tap comes back to the page as `pano:place-select`.
+  document.addEventListener("pano:places", async (event: Event) => {
+    const { target, places } = (event as CustomEvent).detail as {
+      target: string;
+      places: Array<{ id: string; kind: "panorama" | "sun"; name: string; detail: string; yaw: number; pitch: number }>;
+    };
+    const el = document.querySelector<PanoElement>(target);
+    if (!el) return;
+
+    const viewer = await (el._panoBoot ?? Promise.resolve(el._panoViewer ?? null));
+    const plugin = viewer?.getPlugin<MarkersPluginType>("markers");
+    if (!plugin) return;
+
+    watchForCollisions(viewer!, el);
+
+    replaceMarkerGroup(
+      plugin,
+      "place-",
+      places.map((place, index) => ({
+        id: place.id,
+        position: { yaw: place.yaw, pitch: place.pitch },
+        // A negative rank wins every collision against a peak label. An arrow
+        // is a way out of this panorama, and a summit name is a caption.
+        html:
+          place.kind === "sun"
+            ? `<span class="place-pin__plate" data-rank="${-100 + index}"><span class="place-pin__sun" aria-hidden="true"></span><span class="peak-pin__meta">${escapeHtml(place.detail)}</span></span>`
+            : `<span class="place-pin__plate" data-rank="${-100 + index}" role="button" aria-label="Go to ${escapeHtml(place.name)}, ${escapeHtml(place.detail)}"><span class="place-pin__name"><span aria-hidden="true">⇢</span> ${escapeHtml(place.name)}</span><span class="peak-pin__meta">${escapeHtml(place.detail)}</span></span><span class="place-pin__stem"></span>`,
+        className: `place-pin place-pin--${place.kind}`,
+        anchor: place.kind === "sun" ? "center center" : "bottom center",
         scale: { zoom: [0.9, 1.1] },
       })),
     );
@@ -1335,10 +1521,15 @@ const {
 
   // Let other scripts (the gallery's lightbox) drive a viewer directly.
   document.addEventListener("pano:load", (event: Event) => {
-    const { target, src, caption } = (event as CustomEvent).detail as {
+    const { target, src, caption, keepView } = (event as CustomEvent).detail as {
       target: string;
       src: string;
       caption?: string;
+      /**
+       * Keep looking where the reader looks now, turned by `yawOffset` degrees.
+       * Then-and-now uses it: the same place on two dates, with two headings.
+       */
+      keepView?: { yawOffset: number };
     };
     const el = document.querySelector<PanoElement>(target);
     if (!el) return;
@@ -1371,7 +1562,18 @@ const {
       el._panoResolutions = [];
       el._panoResolutionIndex = 0;
       el._panoViewer.getPlugin<MarkersPluginType>("markers")?.clearMarkers();
-      void el._panoViewer.setPanorama(src, { caption, transition: { effect: "fade" } });
+      const viewer = el._panoViewer;
+      const now = viewer.getPosition();
+      void viewer.setPanorama(src, {
+        caption,
+        transition: { effect: "fade" },
+        ...(keepView
+          ? {
+              position: { yaw: now.yaw + keepView.yawOffset * DEG, pitch: now.pitch },
+              zoom: viewer.getZoomLevel(),
+            }
+          : {}),
+      });
     } else {
       void boot(el);
     }

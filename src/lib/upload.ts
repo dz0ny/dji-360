@@ -15,6 +15,7 @@
 
 import { API } from "@/config";
 import { type CardFacts, horizonCrop, renderCard } from "@/lib/card";
+import { correctCapture, localInstant } from "@/lib/clock";
 import { buildDerivatives } from "@/lib/derive";
 import { readPanoMetadata } from "@/lib/exif";
 import type { Photo } from "@/lib/photos";
@@ -148,6 +149,9 @@ export async function uploadPanorama(
 
 	report("reading", 0);
 	const meta = await readPanoMetadata(file);
+	// The drone's clock can run on another zone. The file name holds the
+	// phone's, and the phone is right (see `src/lib/clock.ts`).
+	meta.capturedAt = correctCapture(meta.capturedAt, file.name, localInstant);
 
 	/*
 	 * Name it after where it was flown, unless a title was typed in. A drone
