@@ -34,7 +34,7 @@ function formatCoords(lat, lon) {
 }
 
 /** Everything the head needs, derived from what the upload stored. */
-function cardFor(id, meta, origin) {
+function cardFor(id, meta, origin, version) {
 	const date = formatDate(meta.capturedAt || meta.uploadedAt);
 	const coords = formatCoords(meta.lat, meta.lon);
 	const title = meta.title || date || 'Panorama';
@@ -47,8 +47,13 @@ function cardFor(id, meta, origin) {
 		title: `${title} | ${SITE_NAME}`,
 		description,
 		url: `${origin}/p/${id}/`,
-		/* Older uploads predate `covers/`; their thumb is the only card we have. */
-		image: `${origin}/~/img/${meta.hasCover ? 'cover' : 'thumb'}/${id}`,
+		// Older uploads predate `covers/`; their thumb is the only card we have.
+		//
+		// The `v` is the version of the record. `photos.js` serves a cover as
+		// immutable, and a redrawn card keeps the same key. So a scraper that
+		// holds the old card would never ask again. A rename rewrites the thumb,
+		// which moves its timestamp, which changes this URL.
+		image: `${origin}/~/img/${meta.hasCover ? 'cover' : 'thumb'}/${id}${version ? `?v=${version}` : ''}`,
 		imageAlt: `360° panorama — ${title}`,
 		imageWidth: meta.hasCover ? '1200' : '800',
 		imageHeight: meta.hasCover ? '630' : '400',
@@ -113,7 +118,8 @@ export async function handlePano(request, env) {
 	const shell = await env.ASSETS.fetch(new URL(SHELL_PATH, url.origin));
 	if (!shell.ok) return shell;
 
-	const card = cardFor(id, { ...(thumb.customMetadata || {}), hasCover: Boolean(cover) }, url.origin);
+	const version = thumb.uploaded ? Math.floor(thumb.uploaded.getTime() / 1000).toString(36) : '';
+	const card = cardFor(id, { ...(thumb.customMetadata || {}), hasCover: Boolean(cover) }, url.origin, version);
 
 	const headers = new Headers(shell.headers);
 	// Short enough that a retitled photo re-previews soon, long enough that a

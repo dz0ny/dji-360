@@ -35,7 +35,7 @@ export interface Photo {
 	originalName: string;
 	/** Whole 2:1 sphere, squashed — only useful as a backdrop. */
 	thumb: string;
-	/** 1200×630 horizon crop that reads as a photograph. Absent on older uploads. */
+	/** 1200×630 branded share card: a horizon crop with the caption over it. */
 	cover: string;
 	preview: string;
 	/** 8192px middle rung. Null when the capture was too small to warrant one. */

@@ -14,11 +14,20 @@
  */
 
 import { API } from "@/config";
+import { type CardFacts, horizonCrop, renderCard } from "@/lib/card";
 import { buildDerivatives } from "@/lib/derive";
 import { readPanoMetadata } from "@/lib/exif";
+import type { Photo } from "@/lib/photos";
 import { lookupPlace } from "@/lib/place";
 
-export type UploadStage = "reading" | "resizing" | "preview" | "large" | "original" | "thumb" | "done";
+export type UploadStage =
+	| "reading"
+	| "resizing"
+	| "preview"
+	| "large"
+	| "original"
+	| "thumb"
+	| "done";
 
 export interface UploadProgress {
 	stage: UploadStage;
@@ -39,7 +48,14 @@ const STAGE_WEIGHT: Record<Exclude<UploadStage, "done">, number> = {
 	thumb: 0.05,
 };
 
-const STAGE_ORDER: Array<Exclude<UploadStage, "done">> = ["reading", "resizing", "preview", "large", "original", "thumb"];
+const STAGE_ORDER: Array<Exclude<UploadStage, "done">> = [
+	"reading",
+	"resizing",
+	"preview",
+	"large",
+	"original",
+	"thumb",
+];
 
 function overallRatio(stage: Exclude<UploadStage, "done">, within: number): number {
 	let done = 0;
@@ -120,7 +136,11 @@ export interface UploadResult {
 
 export async function uploadPanorama(
 	file: File,
-	options: { title?: string; onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+	options: {
+		title?: string;
+		onProgress?: (progress: UploadProgress) => void;
+		signal?: AbortSignal;
+	} = {},
 ): Promise<UploadResult> {
 	const { title = "", onProgress, signal } = options;
 	const report = (stage: Exclude<UploadStage, "done">, within: number) =>
@@ -148,9 +168,17 @@ export async function uploadPanorama(
 	report("reading", 1);
 
 	report("resizing", 0);
-	const { archive, large, preview, cover, thumb, sourceWidth, sourceHeight } = await buildDerivatives(file, (ratio) =>
-		report("resizing", ratio),
-	);
+	// The share card needs the caption, so the facts come in with the file.
+	const cardFacts: CardFacts = {
+		title: resolvedTitle,
+		capturedAt: meta.capturedAt,
+		lat: meta.lat,
+		lon: meta.lon,
+		camera: meta.camera,
+	};
+
+	const { archive, large, preview, cover, thumb, sourceWidth, sourceHeight } =
+		await buildDerivatives(file, cardFacts, (ratio) => report("resizing", ratio));
 
 	// Re-encoding only earns its keep if it actually saves bytes. An already-
 	// efficient source, or one the browser could not re-encode, ships as-is.
@@ -161,7 +189,12 @@ export async function uploadPanorama(
 	const height = meta.height ?? sourceHeight;
 	const id = makeId(meta.capturedAt);
 
-	const upload = (kind: string, blob: Blob, headers: Record<string, string>, onRatio: (ratio: number) => void) =>
+	const upload = (
+		kind: string,
+		blob: Blob,
+		headers: Record<string, string>,
+		onRatio: (ratio: number) => void,
+	) =>
 		put(
 			`${API.upload}/${id}/${kind}`,
 			blob,
@@ -224,8 +257,44 @@ export async function uploadPanorama(
 	};
 }
 
+// Redraw the card of a panorama that is already in the bucket.
+
+// The caption carries the title, so a rename makes the stored card wrong. The
+// source is the 4096px preview, not the archive copy. The preview is one
+// megabyte rather than forty, and the card is only 1200px wide.
+
+// The browser decodes the WebP preview without trouble. Only resvg cannot,
+// which is the reason the Worker does not draw this.
+export async function refreshCard(photo: Photo): Promise<void> {
+	const res = await fetch(photo.preview, { credentials: "include" });
+	if (!res.ok) throw new Error(`Could not read the panorama (${res.status})`);
+
+	const bitmap = await createImageBitmap(await res.blob());
+	try {
+		const card = await renderCard(bitmap, horizonCrop(bitmap.width, bitmap.height), {
+			title: photo.title,
+			capturedAt: photo.capturedAt,
+			lat: photo.lat,
+			lon: photo.lon,
+			camera: photo.camera,
+		});
+
+		await put(
+			`${API.upload}/${encodeURIComponent(photo.id)}/cover`,
+			card.blob,
+			{ "Content-Type": card.type },
+			() => {},
+		);
+	} finally {
+		bitmap.close();
+	}
+}
+
 export async function deletePanorama(id: string): Promise<void> {
-	const res = await fetch(`${API.photos}/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+	const res = await fetch(`${API.photos}/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+		credentials: "include",
+	});
 	if (!res.ok) {
 		const body = await res.json().catch(() => null);
 		throw new Error(body?.error ?? `Delete failed (${res.status})`);

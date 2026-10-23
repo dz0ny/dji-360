@@ -12,6 +12,7 @@
  */
 
 import { DERIVATIVES } from "@/config";
+import { type CardFacts, horizonCrop, renderCard } from "@/lib/card";
 
 export interface Derivative {
 	blob: Blob;
@@ -20,25 +21,15 @@ export interface Derivative {
 	type: string;
 }
 
-/** Source rectangle to draw from; omitted means the whole bitmap. */
-interface Crop {
-	sx: number;
-	sy: number;
-	sw: number;
-	sh: number;
-}
-
 /** Safari only grew `OffscreenCanvas.convertToBlob` in 16.4; fall back politely. */
 async function encode(
 	source: ImageBitmap,
 	width: number,
 	height: number,
 	quality: number,
-	crop?: Crop,
 ): Promise<{ blob: Blob; type: string }> {
 	const draw = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
-		if (crop) ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height);
-		else ctx.drawImage(source, 0, 0, width, height);
+		ctx.drawImage(source, 0, 0, width, height);
 	};
 
 	// WebP is ~30% smaller than JPEG at the same quality and is universally
@@ -81,7 +72,7 @@ export interface Derivatives {
 	 */
 	large: Derivative | null;
 	preview: Derivative;
-	/** Social card — a horizon crop, not the whole squashed sphere. */
+	/** The branded share card — a horizon crop with the caption over it. */
 	cover: Derivative;
 	thumb: Derivative;
 	/** Decoded source dimensions — the true capture size. */
@@ -93,7 +84,11 @@ export interface Derivatives {
  * `onStep` reports 0–1 across the decode and the encodes that follow. Encoding 72 MP
  * takes long enough on a phone that a frozen progress bar reads as a hang.
  */
-export async function buildDerivatives(file: File, onStep?: (ratio: number) => void): Promise<Derivatives> {
+export async function buildDerivatives(
+	file: File,
+	facts: CardFacts = {},
+	onStep?: (ratio: number) => void,
+): Promise<Derivatives> {
 	// Full decode, deliberately: the archive keeps every pixel, and every
 	// smaller size is drawn down from this one bitmap rather than re-decoding.
 	const bitmap = await createImageBitmap(file);
@@ -146,7 +141,7 @@ export async function buildDerivatives(file: File, onStep?: (ratio: number) => v
 			archive,
 			large,
 			preview: await derive(DERIVATIVES.preview.width, DERIVATIVES.preview.quality, 0.9),
-			cover: await deriveCover(bitmap),
+			cover: await renderCard(bitmap, horizonCrop(bitmap.width, bitmap.height), facts),
 			thumb: await derive(DERIVATIVES.thumb.width, DERIVATIVES.thumb.quality, 1),
 			sourceWidth: bitmap.width,
 			sourceHeight: bitmap.height,
@@ -157,37 +152,13 @@ export async function buildDerivatives(file: File, onStep?: (ratio: number) => v
 }
 
 /**
- * The link-preview card.
- *
- * An equirectangular image squashed into a 1.91:1 box is a smear of horizon and
- * two stretched poles — unreadable at thumbnail size. Crop instead: an
- * equirectangular projection maps degrees to pixels linearly, so a slice
- * `fovDegrees / 360` wide, centred on the image, is exactly the view the sphere
- * opens at (Photo Sphere Viewer puts yaw 0 / pitch 0 at the image centre). It
- * still bends toward the edges, but it reads as a photograph.
- */
-async function deriveCover(bitmap: ImageBitmap): Promise<Derivative> {
-	const { width, height, fovDegrees, quality } = DERIVATIVES.cover;
-
-	const sw = Math.min(bitmap.width, Math.round((bitmap.width * fovDegrees) / 360));
-	// Same degrees-per-pixel vertically as horizontally, so the crop is undistorted.
-	const sh = Math.min(bitmap.height, Math.round(sw / (width / height)));
-
-	const { blob, type } = await encode(bitmap, width, height, quality, {
-		sx: Math.round((bitmap.width - sw) / 2),
-		sy: Math.round((bitmap.height - sh) / 2),
-		sw,
-		sh,
-	});
-
-	return { blob, width, height, type };
-}
-
-/**
  * A panorama that is not 2:1 is not equirectangular, and the sphere viewer will
  * stretch it. Warn rather than block — cropped panoramas are still worth having.
  */
-export function aspectWarning(width: number | undefined, height: number | undefined): string | null {
+export function aspectWarning(
+	width: number | undefined,
+	height: number | undefined,
+): string | null {
 	if (!width || !height) return null;
 	const ratio = width / height;
 	if (Math.abs(ratio - 2) < 0.02) return null;

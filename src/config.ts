@@ -19,6 +19,22 @@ export const SITE_URL = "https://dji.dz0ny.dev";
  */
 export const SOCIAL_IMAGE = "/og.jpg";
 
+// The share card, drawn in the browser by `src/lib/card.ts`.
+
+// A whole equirectangular image squashed into a link preview is unreadable, so
+// the card takes a 110° slice of the horizon. Every scraper wants 1200×630.
+
+// JPEG, because X and LinkedIn still refuse a WebP `og:image`. The accent is
+// `--brand-accent` lifted in lightness, so it holds up over a dark photograph.
+export const CARD = {
+	width: 1200,
+	height: 630,
+	fovDegrees: 110,
+	quality: 0.82,
+	type: "image/jpeg",
+	accent: "#3cb6f5",
+} as const;
+
 /**
  * Worker endpoints.
  *
@@ -64,12 +80,6 @@ export const DERIVATIVES = {
 	 * last decade takes an 8192px texture without complaint.
 	 */
 	large: { width: 8192, quality: 0.82 },
-	/**
-	 * Social card. Cropped to a slice of the horizon rather than the whole
-	 * sphere — a full equirectangular squashed into a link preview is unreadable.
-	 * 1200×630 is the size every scraper wants; 110° is a natural-looking FOV.
-	 */
-	cover: { width: 1200, height: 630, fovDegrees: 110, quality: 0.8 },
 	/** Gallery card. 2:1 like everything else. */
 	thumb: { width: 800, quality: 0.72 },
 } as const;

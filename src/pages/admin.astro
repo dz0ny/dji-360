@@ -56,9 +56,21 @@ import Layout from "@/layouts/Layout.astro";
       <div class="mt-12">
         <div class="flex items-baseline justify-between gap-4 border-b border-border/70 pb-4">
           <h2 class="font-display text-lg font-extrabold tracking-tight sm:text-xl">In the archive</h2>
-          <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
-            Loading
-          </p>
+          <div class="flex items-baseline gap-4">
+            {/*
+              Every panorama uploaded before the branded card has a plain crop
+              stored as WebP, which most feed scrapers refuse. This walks the
+              whole archive and redraws each one.
+            */}
+            <button
+              type="button"
+              data-redraw-all
+              class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-40"
+            >Redraw all</button>
+            <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
+              Loading
+            </p>
+          </div>
         </div>
         <ul class="divide-y divide-border/70" data-manage></ul>
       </div>
@@ -70,7 +82,14 @@ import Layout from "@/layouts/Layout.astro";
 
 <script>
   import { displayTitle, escapeHtml, fetchPhotos, formatBytes, formatDate, viewUrl, type Photo } from "@/lib/photos";
-  import { deletePanorama, renamePanorama, uploadPanorama, whoami, type UploadStage } from "@/lib/upload";
+  import {
+    deletePanorama,
+    refreshCard,
+    renamePanorama,
+    uploadPanorama,
+    whoami,
+    type UploadStage,
+  } from "@/lib/upload";
   import { lookupPlace } from "@/lib/place";
 
   const gate = document.querySelector<HTMLElement>("[data-gate]");
@@ -83,6 +102,7 @@ import Layout from "@/layouts/Layout.astro";
   const queue = document.querySelector<HTMLElement>("[data-queue]");
   const manage = document.querySelector<HTMLElement>("[data-manage]");
   const manageHint = document.querySelector<HTMLElement>("[data-manage-hint]");
+  const redrawAllButton = document.querySelector<HTMLButtonElement>("[data-redraw-all]");
   const fatal = document.querySelector<HTMLElement>("[data-fatal]");
 
   const STAGE_LABEL: Record<UploadStage, string> = {
@@ -185,6 +205,10 @@ import Layout from "@/layouts/Layout.astro";
 
   /* --------------------------------------------------------------- manage */
 
+  // The rows that are on screen now, by id. Redrawing a card needs the facts
+  // of the panorama, and the row markup only carries what it displays.
+  let known = new Map<string, Photo>();
+
   function manageRow(photo: Photo): string {
     const title = escapeHtml(displayTitle(photo));
     const located = photo.lat != null && photo.lon != null;
@@ -229,6 +253,13 @@ import Layout from "@/layouts/Layout.astro";
           >Geo</button>
           <button
             type="button"
+            data-card
+            class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Redraw the share card for ${title}"
+            title="Redraw the share card"
+          >Card</button>
+          <button
+            type="button"
             data-delete
             class="grid size-11 place-items-center rounded-md font-mono text-[0.625rem] uppercase text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
             aria-label="Delete ${title}"
@@ -241,6 +272,7 @@ import Layout from "@/layouts/Layout.astro";
     if (!manage) return;
     try {
       const photos = await fetchPhotos();
+      known = new Map(photos.map((photo) => [photo.id, photo]));
       manage.innerHTML = photos.map(manageRow).join("");
       if (manageHint) {
         manageHint.textContent = photos.length
@@ -253,6 +285,62 @@ import Layout from "@/layouts/Layout.astro";
     }
   }
 
+  // Redraw one stored card, then touch the record.
+
+  // `worker/pano.js` hangs the timestamp of the thumb on the og:image URL, and
+  // `handlePatch` re-puts the thumb for any PATCH. So writing the title back
+  // unchanged moves the address, and a scraper that holds the old card asks
+  // again. Without it the cover key never changes and the card stays cached.
+  async function redrawStored(photo: Photo): Promise<void> {
+    await refreshCard(photo);
+    await renamePanorama(photo.id, photo.title);
+  }
+
+  // Walk the whole archive, one panorama at a time.
+
+  // Sequential, like the upload queue. Each pass decodes a 4096px panorama,
+  // which is about 34 MB of bitmap, and a phone that decodes five at once dies.
+
+  // One failure never stops the sweep. A photo with a broken preview must not
+  // cost the other twenty-nine their cards.
+  async function redrawAll() {
+    if (busy || !redrawAllButton) return;
+
+    const photos = [...known.values()];
+    if (!photos.length) return;
+    if (!window.confirm(`Redraw the share card for ${photos.length} panoramas? This takes a while.`)) return;
+
+    busy = true;
+    redrawAllButton.disabled = true;
+    const label = redrawAllButton.textContent;
+
+    let done = 0;
+    const failed: string[] = [];
+
+    for (const photo of photos) {
+      redrawAllButton.textContent = `${done + 1} of ${photos.length}`;
+      try {
+        await redrawStored(photo);
+        done++;
+      } catch {
+        failed.push(displayTitle(photo));
+      }
+    }
+
+    busy = false;
+    redrawAllButton.disabled = false;
+    redrawAllButton.textContent = label;
+
+    if (failed.length) {
+      showFatal(`${done} of ${photos.length} redrawn. These failed: ${failed.join(", ")}`);
+    }
+    void loadManage();
+  }
+
+  redrawAllButton?.addEventListener("click", () => {
+    void redrawAll();
+  });
+
   /**
    * `prompt`/`confirm` are the one place a modal dialog is the honest control:
    * a rename is a single field and a delete is irreversible.
@@ -263,13 +351,47 @@ import Layout from "@/layouts/Layout.astro";
     const id = row?.dataset.row;
     if (!row || !id) return;
 
+    // A card that still shows the old title is worse than no card, so a rename
+    // and the card go together. The card goes first: `worker/pano.js` hangs the
+    // timestamp of the thumb on the og:image URL, and the rename moves that
+    // timestamp. A scraper in the gap would cache the old pixels under the new
+    // address and keep them.
+    const redraw = async (title: string) => {
+      const photo = known.get(id);
+      if (photo) await refreshCard({ ...photo, title });
+    };
+
     if (target.closest("[data-rename]")) {
       const current = row.querySelector("p")?.textContent?.trim() ?? "";
       const next = window.prompt("Title", current);
       if (next === null) return;
-      void renamePanorama(id, next)
+      void redraw(next.trim())
+        .then(() => renamePanorama(id, next))
         .then(loadManage)
         .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Rename failed"));
+      return;
+    }
+
+    if (target.closest("[data-card]")) {
+      const button = target.closest<HTMLButtonElement>("[data-card]");
+      const photo = known.get(id);
+      if (!button || !photo) return;
+
+      // Decoding a 4096px panorama takes a second or two on a phone.
+      button.disabled = true;
+      button.textContent = "…";
+
+      void redrawStored(photo)
+        .then(() => {
+          button.textContent = "Done";
+        })
+        .catch((error: unknown) => {
+          button.textContent = "Card";
+          showFatal(error instanceof Error ? error.message : "Could not redraw the card");
+        })
+        .finally(() => {
+          if (button.isConnected) button.disabled = false;
+        });
       return;
     }
 
@@ -293,7 +415,9 @@ import Layout from "@/layouts/Layout.astro";
           // Confirmed rather than applied: the geocoder picks the nearest named
           // thing, which is not always the thing the photo is of.
           if (!window.confirm(`Name this "${place.name}"?\n\n${place.display}`)) return;
-          return renamePanorama(id, place.name).then(loadManage);
+          return redraw(place.name)
+            .then(() => renamePanorama(id, place.name))
+            .then(loadManage);
         })
         .catch((error: unknown) => showFatal(error instanceof Error ? error.message : "Could not name it"))
         .finally(() => {
