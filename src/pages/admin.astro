@@ -181,13 +181,39 @@ import Layout from "@/layouts/Layout.astro";
     busy = true;
     let uploaded = 0;
 
+    // The archive list feeds the duplicate check. A drop can land before the
+    // first listing does, so load it here when it is still empty.
+    if (known.size === 0) await loadManage();
+
+    // Files that went up in this same run are not in `known` until the run
+    // ends. Two copies dropped together must still count as a pair.
+    const sentThisRun = new Map<string, string>();
+
     for (const file of files) {
       const row = queueRow(file);
+
+      // DJI names every file after the second it was shot, so the name and the
+      // size together identify one capture. Older records have no size.
+      const key = `${file.name}\u0000${file.size}`;
+      const twin =
+        [...known.values()].find(
+          (photo) => photo.originalName === file.name && (photo.sourceBytes == null || photo.sourceBytes === file.size),
+        )?.title ?? sentThisRun.get(key);
+
+      if (twin !== undefined) {
+        const named = twin || "an untitled panorama";
+        if (!window.confirm(`${file.name} is already in the archive as "${named}". Upload it again?`)) {
+          row.setError(`Skipped: already in the archive as "${named}"`);
+          continue;
+        }
+      }
+
       try {
         const { id, title, warning } = await uploadPanorama(file, {
           onProgress: ({ stage, ratio }) => row.setStage(stage, ratio),
         });
         row.setDone(id, title, warning);
+        sentThisRun.set(key, title);
         uploaded++;
       } catch (error) {
         row.setError(error instanceof Error ? error.message : "Upload failed");
@@ -362,7 +388,9 @@ import Layout from "@/layouts/Layout.astro";
     };
 
     if (target.closest("[data-rename]")) {
-      const current = row.querySelector("p")?.textContent?.trim() ?? "";
+      // The stored title, not the row text. The row can show the time of the
+      // shot. A save of that text makes the time part of the name.
+      const current = known.get(id)?.title ?? "";
       const next = window.prompt("Title", current);
       if (next === null) return;
       void redraw(next.trim())

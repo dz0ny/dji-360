@@ -5,7 +5,8 @@
  * fetched at runtime from the Worker rather than baked into the HTML.
  */
 
-import { API } from "@/config";
+import { API, HOME_TIME_ZONE } from "@/config";
+import { correctCapture, zonedInstant } from "@/lib/clock";
 
 export interface Photo {
 	id: string;
@@ -42,13 +43,53 @@ export interface Photo {
 	large: string | null;
 	largeBytes: number | null;
 	original: string;
+	/**
+	 * What to call it while browsing the archive, when the title alone is not
+	 * enough. The Worker never sends this; `fetchPhotos` adds it.
+	 */
+	label?: string;
 }
 
 export async function fetchPhotos(): Promise<Photo[]> {
 	const res = await fetch(API.photos, { headers: { Accept: "application/json" } });
 	if (!res.ok) throw new Error(`Could not load the archive (${res.status})`);
 	const data = (await res.json()) as { photos?: Photo[] };
-	return data.photos ?? [];
+	// Times first: the labels below read the capture time.
+	const photos = (data.photos ?? []).map((photo) => ({
+		...photo,
+		capturedAt:
+			correctCapture(photo.capturedAt, photo.originalName, (wall) =>
+				zonedInstant(wall, HOME_TIME_ZONE),
+			) ?? "",
+	}));
+	return labelSameFlight(photos);
+}
+
+// Tell apart the shots of one flight.
+
+// The upload names a panorama after the nearest place on the map. Three frames
+// from one flight land on the same hill, so they all get the same name. The
+// gallery then shows three cards that a reader cannot tell apart.
+
+// The same name on different days needs nothing, because every card already
+// shows its date. Only same name and same day gets the time of the shot.
+
+// Two frames shot in the same second keep the same label. That is one file
+// uploaded twice, and a counter would hide it.
+function labelSameFlight(photos: Photo[]): Photo[] {
+	const flights = new Map<string, Photo[]>();
+	for (const photo of photos) {
+		const date = photoDate(photo);
+		if (!photo.title || !date) continue;
+		const key = `${photo.title}\u0000${date.toDateString()}`;
+		flights.set(key, [...(flights.get(key) ?? []), photo]);
+	}
+
+	for (const flight of flights.values()) {
+		if (flight.length < 2) continue;
+		for (const photo of flight) photo.label = `${photo.title} · ${formatTime(photo)}`;
+	}
+	return photos;
 }
 
 /** Prefer the moment the shutter fired; fall back to when it landed in R2. */
@@ -83,8 +124,25 @@ export function formatBytes(bytes: number | null): string {
 	return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes / 1024)} kB`;
 }
 
-/** Title falls back to the date so a card is never blank. */
+/** Same clock as `formatDate`: the reader's own locale and time zone. */
+export function formatTime(photo: Photo): string {
+	const date = photoDate(photo);
+	if (!date) return "";
+	// "numeric", not "2-digit": a 12-hour locale would print "05:55 PM".
+	return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** The name in the gallery, the viewer and the map pins, so a card is never blank or ambiguous. */
 export function displayTitle(photo: Photo): string {
+	return photo.label || photo.title || formatDate(photo);
+}
+
+// The name without the time that tells it apart from its neighbours.
+
+// Use it where the photo stands alone, such as a saved video or a map site.
+// Use it also to prefill a rename. A rename that starts from the label would
+// store the time in the title for good.
+export function plainTitle(photo: Photo): string {
 	return photo.title || formatDate(photo);
 }
 

@@ -76,7 +76,24 @@ export interface PlacedPeak extends PeakSource {
 	rank: number;
 }
 
-const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const COMPASS = [
+	"N",
+	"NNE",
+	"NE",
+	"ENE",
+	"E",
+	"ESE",
+	"SE",
+	"SSE",
+	"S",
+	"SSW",
+	"SW",
+	"WSW",
+	"W",
+	"WNW",
+	"NW",
+	"NNW",
+];
 
 export function compassLabel(bearing: number): string {
 	return COMPASS[Math.round(normalizeDegrees(bearing) / 22.5) % 16];
@@ -117,7 +134,27 @@ export interface ViewpointOptions {
 	limit?: number;
 	/** Ignore anything nearer than this; a summit 300 m away is scenery, not a label. */
 	minDistance?: number;
+	/** The ground around the camera. Without it, only named summits can hide a peak. */
+	terrain?: TerrainRing | null;
 }
+
+/** Ground heights on a ring of bearings and distances, from `/~/api/terrain/<id>`. */
+export interface TerrainRing {
+	bearings: number;
+	/** Metres from the camera, nearest first. */
+	distances: number[];
+	/** `ele[bearing][step]`, metres above sea level. */
+	ele: number[][];
+}
+
+// Where the ground check stops, and how high the ground must rise to hide a
+// summit.
+
+// The check stops short of the summit, at 80% of its distance. The DEM smooths
+// a summit into its shoulders, and a shoulder near the top must not hide it.
+// The margin absorbs the error of a 53 m grid against a surveyed OSM height.
+const GROUND_REACH = 0.8;
+const GROUND_MARGIN = 0.3;
 
 /**
  * How the labels are spread and stacked.
@@ -134,28 +171,65 @@ const MIN_SEPARATION = 2.5;
 const TIER_WINDOW = 9;
 const TIERS = 3;
 
-/**
- * Camera height above sea level.
- *
- * Preference order matters: a recorded AMSL figure beats anything derived. The
- * fallback adds the drone's height over its take-off point to the ground under
- * the panorama, which assumes it took off nearby — true of essentially every
- * flight, and wrong by only the few metres that assumption costs.
- */
-export function eyeElevation(payload: PeaksPayload, options: ViewpointOptions): number | null {
-	if (options.altitudeAmsl != null && Number.isFinite(options.altitudeAmsl)) return options.altitudeAmsl;
+// Camera height above sea level.
 
-	if (options.altitude != null && Number.isFinite(options.altitude)) {
-		// Older records kept a single `altitude` field that was whichever datum
-		// the file happened to carry. No drone flies 600 m above where it took
-		// off, so a figure that large is a sea-level reading wearing the wrong
-		// name — and adding the ground to it would put the camera a kilometre
-		// too high, tipping every label below the summit it belongs to.
-		if (options.altitude > 600) return options.altitude;
-		if (payload.groundEle != null) return payload.groundEle + options.altitude;
+// The ground under the panorama plus the height above take-off comes first. A
+// panorama hovers over the spot it took off from, so the sum is right to a few
+// metres. The barometric height above take-off is the steadiest figure DJI
+// records.
+
+// The recorded sea-level figure comes second, and only when it clears the
+// ground. Across this archive it runs from 583 m too low to 300 m too high
+// against that sum. Five frames put the camera underground. Kucelj and Iga vas
+// share 1000.894 m to the millimetre, as do Grohari and Gorači at 1042.664 m.
+// A camera underground hid every summit behind the ground in front of it.
+
+// Older records kept one field for both. The same value in both slots names
+// no datum. It counts as sea level only when it clears the ground. It never
+// counts as a height above take-off.
+export function eyeElevation(payload: PeaksPayload, options: ViewpointOptions): number | null {
+	const ground = payload.groundEle;
+	const amsl =
+		options.altitudeAmsl != null && Number.isFinite(options.altitudeAmsl)
+			? options.altitudeAmsl
+			: null;
+	const relative =
+		options.altitude != null && Number.isFinite(options.altitude) ? options.altitude : null;
+	const oneField = amsl != null && relative != null && amsl === relative;
+
+	if (
+		!oneField &&
+		ground != null &&
+		relative != null &&
+		relative > 0 &&
+		relative <= MAX_FLIGHT_HEIGHT
+	) {
+		return ground + relative;
 	}
 
-	return payload.groundEle;
+	const recorded = amsl ?? (relative != null && relative > MAX_FLIGHT_HEIGHT ? relative : null);
+	if (recorded != null && (ground == null || recorded > ground)) return recorded;
+
+	return ground;
+}
+
+/** DJI caps the height above take-off at 500 m, so a larger figure is sea level. */
+const MAX_FLIGHT_HEIGHT = 500;
+
+// The ground height at one point of the ring, for anything placed on it.
+
+// The arrows to other panoramas need the ground under the other drone. The
+// ring holds it for every bearing out to 15 km. Nearer than the first sample,
+// the first sample stands in.
+export function groundAt(terrain: TerrainRing, bearing: number, distance: number): number | null {
+	const column = terrain.ele[Math.round(normalizeDegrees(bearing)) % terrain.bearings];
+	if (!column) return null;
+	let best = 0;
+	for (let i = 1; i < terrain.distances.length; i++) {
+		if (Math.abs(terrain.distances[i] - distance) < Math.abs(terrain.distances[best] - distance))
+			best = i;
+	}
+	return distance > terrain.distances[terrain.distances.length - 1] ? null : column[best];
 }
 
 /**
@@ -167,8 +241,23 @@ function apparentAngle(targetEle: number, eyeEle: number, distance: number): num
 }
 
 /** How far below horizontal the true horizon sits, for a camera this high. */
-function horizonAngle(eyeEle: number): number {
+export function horizonAngle(eyeEle: number): number {
 	return -Math.sqrt((2 * Math.max(eyeEle, 1)) / R_EFF) / DEG;
+}
+
+// Does the ground between here and the summit rise in front of it?
+
+// The check reads the one ring column nearest the summit's bearing. A summit
+// hidden this way is behind a hill that OSM never named.
+function hiddenByGround(terrain: TerrainRing, peak: PlacedPeak, eyeEle: number): boolean {
+	const column = terrain.ele[Math.round(normalizeDegrees(peak.bearing)) % terrain.bearings];
+	if (!column) return false;
+	for (let i = 0; i < terrain.distances.length; i++) {
+		const reach = terrain.distances[i];
+		if (reach >= peak.distance * GROUND_REACH) break;
+		if (apparentAngle(column[i], eyeEle, reach) > peak.angle + GROUND_MARGIN) return true;
+	}
+	return false;
 }
 
 /**
@@ -210,8 +299,11 @@ export function placePeaks(payload: PeaksPayload, options: ViewpointOptions = {}
 		if (distance < minDistance) continue;
 
 		const angle = apparentAngle(peak.ele, eyeEle, distance);
-		// Below the horizon line is beyond it: the earth itself is in the way.
-		if (angle < horizon) continue;
+		// Below the horizon line means beyond it, but only far away. A near hill
+		// below the drone is plainly in view, and the camera looks down on it.
+		// Inside the reach of the ground ring, the ring decides instead.
+		const ringReach = options.terrain?.distances.at(-1) ?? 0;
+		if (angle < horizon && distance > ringReach) continue;
 
 		const bearing = initialBearing(payload.lat, payload.lon, peak.lat, peak.lon);
 		placed.push({
@@ -230,7 +322,9 @@ export function placePeaks(payload: PeaksPayload, options: ViewpointOptions = {}
 	// front of it.
 	placed.sort((a, b) => a.distance - b.distance);
 	const visible: PlacedPeak[] = [];
+	const terrain = options.terrain;
 	for (const peak of placed) {
+		if (terrain && hiddenByGround(terrain, peak, eyeEle)) continue;
 		if (!isOccluded(peak, visible)) visible.push(peak);
 	}
 
@@ -242,9 +336,12 @@ export function placePeaks(payload: PeaksPayload, options: ViewpointOptions = {}
 	const kept = selectAcrossHorizon(visible, limit);
 	// Ranked before the list is turned back into a sweep of the horizon, because
 	// the ranking is the tie-break the viewer needs and bearing order is not.
-	kept.slice().sort((a, b) => score(b, horizon) - score(a, horizon)).forEach((peak, index) => {
-		peak.rank = index;
-	});
+	kept
+		.slice()
+		.sort((a, b) => score(b, horizon) - score(a, horizon))
+		.forEach((peak, index) => {
+			peak.rank = index;
+		});
 	return assignTiers(kept);
 }
 
@@ -323,8 +420,27 @@ function score(peak: PlacedPeak, horizon: number): number {
 	return (peak.angle - horizon) * 2 + peak.ele / 1500 - peak.distance / 40000;
 }
 
+// Where any point on the ground or in the air sits, seen from the camera.
+
+// The peak maths above, for one point that is not a summit: another panorama's
+// drone, say. Curvature and refraction apply the same way.
+export function placePoint(
+	from: { lat: number; lon: number },
+	to: { lat: number; lon: number; ele: number },
+	eyeEle: number,
+): { bearing: number; distance: number; angle: number } {
+	const distance = haversine(from.lat, from.lon, to.lat, to.lon);
+	return {
+		bearing: initialBearing(from.lat, from.lon, to.lat, to.lon),
+		distance,
+		angle: apparentAngle(to.ele, eyeEle, distance),
+	};
+}
+
 export function formatDistance(metres: number): string {
-	return metres < 1000 ? `${Math.round(metres / 10) * 10} m` : `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`;
+	return metres < 1000
+		? `${Math.round(metres / 10) * 10} m`
+		: `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`;
 }
 
 /**
@@ -335,7 +451,10 @@ export function formatDistance(metres: number): string {
  * what ties the two frames together. Without it there is no honest answer, and
  * the caller should show the list rather than guess at positions.
  */
-export function spherePosition(peak: PlacedPeak, heading: number): { yaw: number; pitch: number } {
+export function spherePosition(
+	peak: Pick<PlacedPeak, "bearing" | "angle">,
+	heading: number,
+): { yaw: number; pitch: number } {
 	return { yaw: bearingDelta(peak.bearing, heading) * DEG, pitch: peak.angle * DEG };
 }
 
@@ -348,12 +467,39 @@ export function spherePosition(peak: PlacedPeak, heading: number): { yaw: number
  */
 const inFlight = new Map<string, Promise<PeaksPayload>>();
 
+// The ground ring, or null.
+
+// Terrain improves the labels, but the labels never wait on it. Any failure
+// returns null, from a cold Worker to a missing tile. The labels then use the
+// named-summit check alone.
+const terrainInFlight = new Map<string, Promise<TerrainRing | null>>();
+
+export function fetchTerrain(id: string): Promise<TerrainRing | null> {
+	const pending = terrainInFlight.get(id);
+	if (pending) return pending;
+
+	const request = fetch(`${API.terrain}/${encodeURIComponent(id)}`, {
+		headers: { Accept: "application/json" },
+	})
+		.then((res) => (res.ok ? (res.json() as Promise<TerrainRing>) : null))
+		.catch(() => null);
+
+	// Remember a success only. A failed lookup can work on the next panorama.
+	void request.then((ring) => {
+		if (!ring) terrainInFlight.delete(id);
+	});
+	terrainInFlight.set(id, request);
+	return request;
+}
+
 export async function fetchPeaks(id: string): Promise<PeaksPayload> {
 	const pending = inFlight.get(id);
 	if (pending) return pending;
 
 	const request = (async () => {
-		const res = await fetch(`${API.peaks}/${encodeURIComponent(id)}`, { headers: { Accept: "application/json" } });
+		const res = await fetch(`${API.peaks}/${encodeURIComponent(id)}`, {
+			headers: { Accept: "application/json" },
+		});
 		if (!res.ok) {
 			const body = (await res.json().catch(() => null)) as { error?: string } | null;
 			throw new Error(body?.error ?? `Could not load nearby peaks (${res.status})`);

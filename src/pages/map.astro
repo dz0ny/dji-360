@@ -382,6 +382,7 @@ const schema: WithContext<CollectionPage> = {
   maplibregl.setWorkerUrl(maplibreWorkerUrl);
   import {
     displayTitle,
+    plainTitle,
     escapeHtml,
     fetchPhotos,
     formatCoords,
@@ -453,7 +454,7 @@ const schema: WithContext<CollectionPage> = {
 
   /** A place has no name of its own, so a site borrows its newest frame's. */
   function siteLabel(site: Site): string {
-    return displayTitle(site.photos[0]);
+    return plainTitle(site.photos[0]);
   }
 
   function popupHtml(site: Site): string {
