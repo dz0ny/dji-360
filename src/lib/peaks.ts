@@ -153,7 +153,7 @@ export interface TerrainRing {
 // The check stops short of the summit, at 80% of its distance. The DEM smooths
 // a summit into its shoulders, and a shoulder near the top must not hide it.
 // The margin absorbs the error of a 53 m grid against a surveyed OSM height.
-const GROUND_REACH = 0.8;
+export const GROUND_REACH = 0.8;
 const GROUND_MARGIN = 0.3;
 
 /**
@@ -250,12 +250,25 @@ export function horizonAngle(eyeEle: number): number {
 // The check reads the one ring column nearest the summit's bearing. A summit
 // hidden this way is behind a hill that OSM never named.
 function hiddenByGround(terrain: TerrainRing, peak: PlacedPeak, eyeEle: number): boolean {
-	const column = terrain.ele[Math.round(normalizeDegrees(peak.bearing)) % terrain.bearings];
+	return groundHides(terrain, peak, eyeEle, peak.distance * GROUND_REACH);
+}
+
+// Does the ground rise above a direction before `reach` metres?
+
+// The same test for anything seen from the camera: a summit, another drone, or
+// the sun. The sun is infinitely far, so its reach is the whole ring.
+export function groundHides(
+	terrain: TerrainRing,
+	direction: { bearing: number; angle: number },
+	eyeEle: number,
+	reach: number,
+): boolean {
+	const column = terrain.ele[Math.round(normalizeDegrees(direction.bearing)) % terrain.bearings];
 	if (!column) return false;
 	for (let i = 0; i < terrain.distances.length; i++) {
-		const reach = terrain.distances[i];
-		if (reach >= peak.distance * GROUND_REACH) break;
-		if (apparentAngle(column[i], eyeEle, reach) > peak.angle + GROUND_MARGIN) return true;
+		const distance = terrain.distances[i];
+		if (distance >= reach) break;
+		if (apparentAngle(column[i], eyeEle, distance) > direction.angle + GROUND_MARGIN) return true;
 	}
 	return false;
 }

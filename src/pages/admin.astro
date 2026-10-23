@@ -67,6 +67,16 @@ import Layout from "@/layouts/Layout.astro";
               data-redraw-all
               class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-40"
             >Redraw all</button>
+            {/*
+              Writes the corrected capture times back to the records. Shown only
+              while some record still holds a drone clock that ran on another zone.
+            */}
+            <button
+              type="button"
+              data-repair-times
+              hidden
+              class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-40"
+            >Repair times</button>
             <p class="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground" data-manage-hint>
               Loading
             </p>
@@ -86,6 +96,7 @@ import Layout from "@/layouts/Layout.astro";
     deletePanorama,
     refreshCard,
     renamePanorama,
+    saveCaptureTime,
     uploadPanorama,
     whoami,
     type UploadStage,
@@ -103,6 +114,7 @@ import Layout from "@/layouts/Layout.astro";
   const manage = document.querySelector<HTMLElement>("[data-manage]");
   const manageHint = document.querySelector<HTMLElement>("[data-manage-hint]");
   const redrawAllButton = document.querySelector<HTMLButtonElement>("[data-redraw-all]");
+  const repairTimesButton = document.querySelector<HTMLButtonElement>("[data-repair-times]");
   const fatal = document.querySelector<HTMLElement>("[data-fatal]");
 
   const STAGE_LABEL: Record<UploadStage, string> = {
@@ -299,6 +311,11 @@ import Layout from "@/layouts/Layout.astro";
     try {
       const photos = await fetchPhotos();
       known = new Map(photos.map((photo) => [photo.id, photo]));
+      const drifted = photos.filter((photo) => photo.storedCapturedAt).length;
+      if (repairTimesButton) {
+        repairTimesButton.hidden = drifted === 0;
+        repairTimesButton.textContent = `Repair times (${drifted})`;
+      }
       manage.innerHTML = photos.map(manageRow).join("");
       if (manageHint) {
         manageHint.textContent = photos.length
@@ -365,6 +382,48 @@ import Layout from "@/layouts/Layout.astro";
 
   redrawAllButton?.addEventListener("click", () => {
     void redrawAll();
+  });
+
+  // Write each corrected capture time back, one record at a time.
+
+  // The gallery already shows the right time, because `fetchPhotos` corrects
+  // it on load. The stored record still holds the drone clock, and the share
+  // pages and the ID order read the record. After this the correction finds
+  // nothing to move.
+  async function repairTimes() {
+    if (busy || !repairTimesButton) return;
+    const drifted = [...known.values()].filter((photo) => photo.storedCapturedAt);
+    if (!drifted.length) return;
+    if (
+      !window.confirm(
+        `Write the corrected capture time to ${drifted.length} panoramas? Run Redraw all afterwards so the share cards carry the right dates.`,
+      )
+    )
+      return;
+
+    busy = true;
+    repairTimesButton.disabled = true;
+    const failed: string[] = [];
+    let done = 0;
+
+    for (const photo of drifted) {
+      repairTimesButton.textContent = `${done + 1} of ${drifted.length}`;
+      try {
+        await saveCaptureTime(photo.id, photo.capturedAt);
+        done++;
+      } catch {
+        failed.push(displayTitle(photo));
+      }
+    }
+
+    busy = false;
+    repairTimesButton.disabled = false;
+    if (failed.length) showFatal(`${done} of ${drifted.length} repaired. These failed: ${failed.join(", ")}`);
+    void loadManage();
+  }
+
+  repairTimesButton?.addEventListener("click", () => {
+    void repairTimes();
   });
 
   /**

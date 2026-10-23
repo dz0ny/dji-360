@@ -545,9 +545,22 @@ const {
     background: rgb(0 0 0 / 0.4);
   }
 
-  /* A muted place pin stops taking taps along with going invisible. */
+  /*
+    A muted place pin stops taking taps along with going invisible. It leaves
+    the tab order as well: `visibility: hidden` takes focus away, and opacity
+    does not.
+  */
   .pano .place-pin:has(.pin-crowded) {
     pointer-events: none;
+  }
+
+  .pano .place-pin__plate.pin-crowded {
+    visibility: hidden;
+  }
+
+  .pano .place-pin__plate:focus-visible {
+    outline: 2px solid hsl(var(--chrome-accent));
+    outline-offset: 2px;
   }
 
   /* The sun is a marker, not a button: no edge, no tap. */
@@ -666,6 +679,27 @@ const {
   */
   .pano .psv-map:not(.psv-map--maximized) .psv-map__button {
     width: 26px;
+  }
+
+  /*
+    The plugin pushes each corner button 3px out from the map. On the round map
+    that left about 7px between a button and the ring, inside the ring's shadow,
+    so the close button read as sitting on the map. 7px out clears it.
+  */
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__button--top-left {
+    transform: translate(-7px, -7px);
+  }
+
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__button--top-right {
+    transform: translate(7px, -7px);
+  }
+
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__button--bottom-left {
+    transform: translate(-7px, 7px);
+  }
+
+  .pano .psv-map:not(.psv-map--maximized) .psv-map__button--bottom-right {
+    transform: translate(7px, 7px);
   }
 
   .pano .psv-map:not(.psv-map--maximized) .psv-map__toolbar {
@@ -1236,6 +1270,29 @@ const {
       document.dispatchEvent(new CustomEvent("pano:place-select", { detail: { target: `#${el.id}`, id: marker.id } }));
     });
 
+    // Enter or Space on a focused arrow does what a tap does. The markers sit
+    // outside the tab order by default, so the plate carries `tabindex`.
+    el.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const plate = (event.target as HTMLElement).closest<HTMLElement>("[data-place-id]");
+      if (!plate?.dataset.placeId) return;
+      event.preventDefault();
+      // The viewer's own keys must not also fire: Space would start the spin.
+      event.stopPropagation();
+      document.dispatchEvent(
+        new CustomEvent("pano:place-select", { detail: { target: `#${el.id}`, id: plate.dataset.placeId } }),
+      );
+    });
+
+    // A tap on the sphere, as a direction. The page uses it to set north from
+    // the sun: the reader taps the sun, and its known bearing fixes the rest.
+    viewer.addEventListener("click", ({ data }) => {
+      if (data.rightclick) return;
+      document.dispatchEvent(
+        new CustomEvent("pano:click", { detail: { target: `#${el.id}`, yaw: data.yaw, pitch: data.pitch } }),
+      );
+    });
+
     // The navbar exists as soon as the viewer is constructed; do not wait for
     // `ready`, which never fires if the panorama itself fails to load.
     labelButtons(stage);
@@ -1492,7 +1549,7 @@ const {
         html:
           place.kind === "sun"
             ? `<span class="place-pin__plate" data-rank="${-100 + index}"><span class="place-pin__sun" aria-hidden="true"></span><span class="peak-pin__meta">${escapeHtml(place.detail)}</span></span>`
-            : `<span class="place-pin__plate" data-rank="${-100 + index}" role="button" aria-label="Go to ${escapeHtml(place.name)}, ${escapeHtml(place.detail)}"><span class="place-pin__name"><span aria-hidden="true">⇢</span> ${escapeHtml(place.name)}</span><span class="peak-pin__meta">${escapeHtml(place.detail)}</span></span><span class="place-pin__stem"></span>`,
+            : `<span class="place-pin__plate" data-rank="${-100 + index}" data-place-id="${escapeHtml(place.id)}" role="button" tabindex="0" aria-label="Go to ${escapeHtml(place.name)}, ${escapeHtml(place.detail)}"><span class="place-pin__name"><span aria-hidden="true">⇢</span> ${escapeHtml(place.name)}</span><span class="peak-pin__meta">${escapeHtml(place.detail)}</span></span><span class="place-pin__stem"></span>`,
         className: `place-pin place-pin--${place.kind}`,
         anchor: place.kind === "sun" ? "center center" : "bottom center",
         scale: { zoom: [0.9, 1.1] },
