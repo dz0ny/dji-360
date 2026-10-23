@@ -24,7 +24,26 @@ import PanoViewer from "@/components/PanoViewer.astro";
         Sized with h-full rather than `absolute inset-0` — the component root is
         already `relative`, and Tailwind's stylesheet order makes that win over a
         caller's `absolute`, which would collapse the sphere to zero height. */}
-    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers peaks reel />
+    <PanoViewer id="stage" class="h-full w-full" twoFingers={false} map resolutions intro hash markers peaks>
+      {/*
+        The thumb shows while the sphere downloads. Without it the page stays
+        black for as long as the texture takes.
+
+        The thumb is the whole sphere, flat. The first frame of the sphere looks
+        at the horizon with a vertical field of 100°. So the image is 180° tall,
+        scaled to 180% of the frame and centred, and the two line up.
+
+        The blur hides the bend between a flat projection and the sphere. The
+        Worker sets `src` on `/p/<id>/`, so the poster paints before any script.
+      */}
+      <img
+        data-view-poster
+        alt=""
+        aria-hidden="true"
+        decoding="async"
+        class="absolute left-1/2 top-1/2 h-[180%] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 blur-md"
+      />
+    </PanoViewer>
 
     <div
       data-pano-chrome
@@ -46,9 +65,9 @@ import PanoViewer from "@/components/PanoViewer.astro";
           <span aria-hidden="true">›</span>
         </button>
 
-        {/* The pill's reel button opens this same row — it is the one control
-            with a choice attached, and a fifteen-second render is too long a
-            commitment to start from a glyph nobody can read the aspect off. */}
+        {/* The one place to start a reel. It opens a row rather than rendering
+            straight away: there is a choice of aspect, and a fifteen-second
+            render is too long a commitment to start from a single tap. */}
         <button
           type="button"
           class="view-chip"
@@ -221,7 +240,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
 
 <script>
   import { API, SITE_NAME } from "@/config";
-  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl } from "@/lib/photos";
+  import { displayTitle, fetchPhotos, formatBytes, formatCoords, formatDate, mapUrl, plainTitle } from "@/lib/photos";
   import type { Photo } from "@/lib/photos";
   import { fetchPeaks, formatDistance, placePeaks, spherePosition } from "@/lib/peaks";
   import type { PeaksPayload, PlacedPeak } from "@/lib/peaks";
@@ -612,8 +631,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
   /*
     Rendering happens here rather than in the viewer for the same reason the
     summit labels do: the clip needs the title, the date and the coordinates,
-    and the sphere knows none of them. The viewer contributes a button and the
-    progress ring; everything below decides what gets made.
+    and the sphere knows none of them. The top-bar row is the only control.
   */
   type ReelState = "idle" | "working" | "done";
 
@@ -622,14 +640,8 @@ import PanoViewer from "@/components/PanoViewer.astro";
   let reelProgress = 0;
   let reelJob: AbortController | null = null;
 
-  /** Both surfaces, from one place: the pill's ring and the top-bar row. */
+  /** The top-bar row: whether it is offered, and what it is doing. */
   function paintReel() {
-    document.dispatchEvent(
-      new CustomEvent("pano:reel-button", {
-        detail: { target: "#stage", available: reelAvailable, state: reelState, progress: reelProgress },
-      }),
-    );
-
     if (reelOpenEl) reelOpenEl.hidden = !reelAvailable;
     if (reelCancelEl) reelCancelEl.hidden = reelState !== "working";
     // No photo yet means no title, no date and no texture to render from — the
@@ -656,7 +668,7 @@ import PanoViewer from "@/components/PanoViewer.astro";
     const photo = current;
     if (!photo || reelState === "working") return;
 
-    const title = displayTitle(photo);
+    const title = plainTitle(photo);
     const job = new AbortController();
     reelJob = job;
     reelState = "working";
@@ -709,9 +721,6 @@ import PanoViewer from "@/components/PanoViewer.astro";
     button.addEventListener("click", () => void startReel(button.dataset.reelFormat as ReelFormat));
   }
 
-  /** The pill's button has nowhere to show two aspects, so it opens the row. */
-  document.addEventListener("pano:reel", () => openReelRow(reelFormatsEl?.hidden ?? true));
-
   // --- boot -----------------------------------------------------------------
 
   const id = idFromLocation();
@@ -722,6 +731,11 @@ import PanoViewer from "@/components/PanoViewer.astro";
     if (!window.location.pathname.startsWith("/p/")) {
       history.replaceState(null, "", `/p/${encodeURIComponent(id)}/${window.location.hash}`);
     }
+
+    // `/p/<id>/` arrives with the poster already set by the Worker. `/view/?id=`
+    // does not, so set it here, before the sphere asks for its texture.
+    const poster = document.querySelector<HTMLImageElement>("[data-view-poster]");
+    if (poster && !poster.getAttribute("src")) poster.src = `${API.img}/thumb/${id}`;
 
     // Start the sphere immediately — the metadata request can lag behind.
     document.dispatchEvent(

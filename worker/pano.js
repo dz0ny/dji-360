@@ -55,6 +55,9 @@ function cardFor(id, meta, origin, version) {
 		// which moves its timestamp, which changes this URL.
 		image: `${origin}/~/img/${meta.hasCover ? 'cover' : 'thumb'}/${id}${version ? `?v=${version}` : ''}`,
 		imageAlt: `360° panorama — ${title}`,
+		// A rename puts the thumb back with the same pixels, so this URL needs no
+		// version. It matches the gallery URL, so a click from there hits cache.
+		poster: `/~/img/thumb/${id}`,
 		imageWidth: meta.hasCover ? '1200' : '800',
 		imageHeight: meta.hasCover ? '630' : '400',
 	};
@@ -93,6 +96,9 @@ function rewriteHead(response, card) {
 		.on('meta[name="twitter:title"]', set('content', card.title))
 		.on('meta[name="twitter:description"]', set('content', card.description))
 		.on('meta[name="twitter:image"]', set('content', card.image))
+		// The blurred stand-in that view.astro shows while the sphere loads. The
+		// Worker sets it so it paints with the HTML, before any script runs.
+		.on('img[data-view-poster]', set('src', card.poster))
 		.transform(response);
 }
 

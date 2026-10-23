@@ -362,7 +362,9 @@ import Layout from "@/layouts/Layout.astro";
     };
 
     if (target.closest("[data-rename]")) {
-      const current = row.querySelector("p")?.textContent?.trim() ?? "";
+      // The stored title, not the row text. The row can show the time of the
+      // shot. A save of that text makes the time part of the name.
+      const current = known.get(id)?.title ?? "";
       const next = window.prompt("Title", current);
       if (next === null) return;
       void redraw(next.trim())
